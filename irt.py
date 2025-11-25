@@ -3,6 +3,7 @@ import pandas as pd
 import scipy.stats as stats
 from scipy.special import logsumexp
 from scipy.optimize import minimize
+import ctt
 
 # Hàm tính độ phân biệt bằng point-biserial correlation
 def cal_disc(r):
@@ -30,6 +31,17 @@ def irt_probability(theta, a, b):
     b = np.asarray(b).reshape(1, -1)  # (1,J)
     z = 1.702 * a * (theta - b)
     return 1 / (1 + np.exp(-z))
+
+def neg_log_likelihood(theta, responses, item_params):
+    ll = 0.0
+    for j, u in enumerate(responses):
+        a, b = item_params[j]
+        p = irt_probability(theta, a, b)
+        if u == 1:
+            ll += np.log(p + 1e-9)
+        else:
+            ll += np.log(1 - p + 1e-9)
+    return -ll
 
 def log_likelihood(U, a_list, b_list, theta_grid, gh_weights, eps=1e-12):
     """Compute the log-likelihood of the data given item parameters using Gauss-Hermite quadrature."""
@@ -195,3 +207,16 @@ def mmle(U, a_init, b_init, name="MMLE", max_iter=60, K=81, tol=1e-4,
         
 
     return a, b
+
+def theta_estimate(responses, item_params):
+    theta_estimates = []
+    for student_responses in responses:
+        result = minimize(
+            neg_log_likelihood,
+            x0=0,
+            args=(student_responses, item_params),  # tuple
+            bounds=[(-6, 6)],
+            method="L-BFGS-B"
+        )
+        theta_estimates.append(float(result.x))  # kết quả theta
+    return theta_estimates
