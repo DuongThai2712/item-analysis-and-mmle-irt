@@ -12,8 +12,8 @@ def cal_pbcc(true_group, false_group, std, id_value) -> float:
 
 # Tính xác suất CTT
 def cal_diff(data: pd.DataFrame):
-    b = []
-    for j in data.drop(columns=['SBD', 'Total', 'Null']).columns:
+    b = pd.Series(dtype=float, index=data.drop(columns=['SBD', 'Raw', 'Null', 'MaDe', 'Gioi']).columns)
+    for j in data.drop(columns=['SBD', 'Raw', 'Null', 'MaDe', 'Gioi']).columns:
         true = data.eq(1).sum()
         all = data.count()    # Loại hết những trường hợp bỏ full bài
         #để index theo cột câu hỏi
