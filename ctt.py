@@ -14,8 +14,8 @@ def cal_pbcc(true_group, false_group, std, id_value) -> float:
 def cal_diff(data: pd.DataFrame):
     b = pd.Series(dtype=float, index=data.drop(columns=['SBD', 'Raw', 'Null', 'MaDe', 'Gioi']).columns)
     for j in data.drop(columns=['SBD', 'Raw', 'Null', 'MaDe', 'Gioi']).columns:
-        true = data.eq(1).sum()
-        all = data.count()    # Loại hết những trường hợp bỏ full bài
+        true = (data[j] == 1).sum()
+        all = data.shape[0]
         #để index theo cột câu hỏi
         b[j] = true / all
     return b
