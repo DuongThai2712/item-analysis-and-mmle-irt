@@ -3,7 +3,6 @@ import pandas as pd
 import scipy.stats as stats
 from scipy.special import logsumexp
 from scipy.optimize import minimize
-import ctt
 
 # Hàm tính độ phân biệt bằng point-biserial correlation
 def cal_disc(r):

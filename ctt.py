@@ -22,10 +22,21 @@ def cal_diff(data: pd.DataFrame):
 
 # Tính độ phân biệt CTT
 def cal_disc(data: pd.DataFrame):
-    a = []
-    for j in data.drop(columns=['SBD', 'Total', 'Null']).columns:
-        group = int(data.shape[0]*0.27)    # Chia lấy phân vị để tính độ phân biệt
-        upper = data[data['SBD']!=0].sort_values(by='Total', ascending=False).head(group)      # Nhóm cao điểm (loại bỏ trường hợp chặn trên)
-        lower = data[(data['Total'] > 0)].sort_values(by='Total', ascending=True).head(group) # Nhóm thấp điểm (loại bỏ những trường hợp có số câu đúng = 0 và trường hợp chặn dưới)
-        a[j] = ((upper - lower) / group) * 2
+    a = pd.Series(dtype=float, index=data.drop(columns=['SBD', 'Raw', 'Null', 'MaDe', 'Gioi']).columns)
+    group = int(data.shape[0]*0.27)    # Chia lấy phân vị để tính độ phân biệt
+    data_sorted = data.sort_values(by='Raw', ascending=False)
+    
+    upper, lower = data_sorted.head(group), data_sorted.tail(group)
+    for j in data.drop(columns=['SBD', 'Raw', 'Null', 'MaDe', 'Gioi']).columns:
+        U = upper[j].sum()
+        L = lower[j].sum()
+        a[j] = ((U - L) / group)
     return a
+
+# Phân tích độ nhiễu của câu hỏi (các đáp án sai có phân loại tốt không)
+def distractor_analysis(data: pd.DataFrame):
+    distractor = {}
+    for j in data.drop(columns=['SBD', 'Raw', 'Null', 'MaDe', 'Gioi']).columns:
+        counts = data[j].value_counts(normalize=True).to_dict()
+        distractor[j] = counts
+    return distractor
