@@ -32,11 +32,3 @@ def cal_disc(data: pd.DataFrame):
         L = lower[j].sum()
         a[j] = ((U - L) / group)
     return a
-
-# Phân tích độ nhiễu của câu hỏi (các đáp án sai có phân loại tốt không)
-def distractor_analysis(data: pd.DataFrame):
-    distractor = {}
-    for j in data.drop(columns=['SBD', 'Raw', 'Null', 'MaDe', 'Gioi']).columns:
-        counts = data[j].value_counts(normalize=True).to_dict()
-        distractor[j] = counts
-    return distractor
