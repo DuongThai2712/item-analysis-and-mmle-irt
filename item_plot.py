@@ -1,6 +1,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import textwrap
+
 
 # tách thành 4 DataFrame tương ứng với 4 phần thì, mỗi phần 30 câu hỏi
 def tach_phan(df_chamdiem):
@@ -54,7 +56,7 @@ def draw_plot(df, col_name: str, title: str, range):
     sns.set_theme(style="whitegrid")
     plt.rcParams['font.family'] = 'serif'  # or 'sans-serif', 'monospace', 'cursive', 'fantasy'
     plt.rcParams['font.serif'] = ['Times New Roman'] 
-    fig, axes = plt.subplots(ncols=2, nrows=2, figsize=(16, 12))
+    fig, axes = plt.subplots(ncols=2, nrows=2, figsize=(16, 9))
 
     sns.histplot(df[f'{col_name}TV'], bins=30, binrange=range, ax=axes[0, 0], kde=False, color="b")
     axes[0, 0].set_xlabel('Tiếng Việt')
@@ -145,3 +147,63 @@ def plot_item(data_1, data_2, title, order, palette, size):
         if height >0:
             plt.gca().annotate(f'{int(height)}', (p.get_x() + p.get_width() / 2, height),
                             ha='center', va='bottom', fontsize=10)
+
+def oxy_item(ab, title):
+    sns.set_theme(style="whitegrid")
+    plt.figure(figsize=(24, 12))
+    plt.rcParams['font.family'] = 'serif'
+    plt.rcParams['font.serif'] = ['Times New Roman'] 
+    # Scatter plots
+    plt.scatter(y=ab['a_est'], x=ab['b_est'], color='b', label='Tiếng Việt')
+    plt.scatter(y=ab['a_est'], x=ab['b_est'], color='r', label='Tiếng Anh')
+    plt.scatter(y=ab['a_est'], x=ab['b_est'], color='orange', label='Toán')
+    plt.scatter(y=ab['a_est'], x=ab['b_est'], color='g', label='Tư duy khoa học')
+
+    # Gán nhãn số câu
+    for i in range(len(ab)):
+        plt.annotate(str(i+1), (ab['b_est'].iloc[i], ab['a_est'].iloc[i]), 
+                    textcoords="offset pixels", xytext=(6, 6), ha='right')
+
+    ax = plt.gca()
+    ax.spines['left'].set_position('zero')
+    ax.spines['bottom'].set_position('zero')
+
+    ax.spines['right'].set_color('none')
+    ax.spines['top'].set_color('none')
+
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
+
+    plt.title(title, fontsize=16)
+    plt.legend(title='Dạng câu hỏi')
+    plt.grid(True, alpha=0.3)
+
+def wrap_labels(ax, width=10):
+    ax.set_xticklabels(
+        ["\n".join(textwrap.wrap(t.get_text(), width)) for t in ax.get_xticklabels()]
+    )
+    ax.set_yticklabels(
+        ["\n".join(textwrap.wrap(t.get_text(), width)) for t in ax.get_yticklabels()]
+    )
+
+def heatmap_pair(df, col1, col2, title, cmap, order1=None, order2=None, ax=axes):
+    if order1 is not None:
+        df[col1] = pd.Categorical(df[col1], categories=order1, ordered=True)
+    if order2 is not None:
+        df[col2] = pd.Categorical(df[col2], categories=order2, ordered=True)
+
+    ct = pd.crosstab(df[col1], df[col2])
+
+    #plt.figure(figsize=(6, 6))
+    ax = sns.heatmap(ct, annot=True, fmt="d", cmap=cmap, cbar=False, ax=ax)
+
+    ax.set_title(title)
+    plt.xlabel(col2)
+    plt.ylabel(col1)
+
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=0) 
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
+    # Tự động xuống dòng
+    wrap_labels(ax, width=8)
+
+    plt.tight_layout()
