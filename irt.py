@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
-import scipy.stats as stats
 from scipy.special import logsumexp
 from scipy.optimize import minimize
+from scipy.stats import norm, chi2
 
 # Hàm tính độ phân biệt bằng point-biserial correlation
 def cal_disc(r):
@@ -219,3 +219,224 @@ def theta_estimate(responses, item_params):
         )
         theta_estimates.append(float(result.x))  # kết quả theta
     return theta_estimates
+
+def posterior(theta_grid, responses, item_params, prior_mean=0, prior_std=1, eps=1e-12):
+    """
+    Trả về phân phối posterior chưa chuẩn hoá đã được chuẩn hoá (sum/integral = 1).
+    - theta_grid: (M,)
+    - responses: (J,) chứa 0/1 hoặc -1 cho missing
+    - item_params: list/array of (a,b) pairs or shape (J,2)
+    """
+    theta_grid = np.asarray(theta_grid)
+    M = theta_grid.size
+
+    # prior (normalize)
+    prior = norm.pdf(theta_grid, loc=prior_mean, scale=prior_std)
+    prior_sum = np.trapz(prior, theta_grid)
+    if prior_sum <= 0:
+        prior = np.ones_like(prior)
+    else:
+        prior = prior / prior_sum
+
+    lik = np.ones_like(theta_grid, dtype=float) 
+    item_params = np.asarray(item_params)
+    J = item_params.shape[0]
+    for j in range(J):
+        a_j = float(item_params[j, 0])
+        b_j = float(item_params[j, 1])
+        p_j = 1.0 / (1.0 + np.exp(-1.702 * a_j * (theta_grid - b_j)))
+        r = responses[j]
+        if r == -1:
+            continue
+        # multiply likelihood
+        lik *= (p_j ** (r)) * ((1.0 - p_j) ** (1 - r))
+
+    post_unnorm = prior * lik
+    integral = np.trapz(post_unnorm, theta_grid)
+    if integral <= 0:
+        # fallback
+        post = prior.copy()
+        post /= np.trapz(post, theta_grid)
+    else:
+        post = post_unnorm / integral
+
+    return post
+
+def ability_se(responses, item_params, theta_estimate, prior_mean=0, prior_std=1,
+               theta_min=-6, theta_max=6, num_points=1001):
+    """
+    Tính SE cho ước lượng theta (EAP) bằng phương pháp tích phân posterior.
+    Trả về standard error (sqrt of posterior variance).
+    """
+    theta_grid = np.linspace(theta_min, theta_max, num_points)
+    post = posterior(theta_grid, responses, item_params, prior_mean, prior_std)
+    # đảm bảo posterior chuẩn hoá
+    post /= np.trapz(post, theta_grid)
+
+
+    var = np.trapz((theta_grid - theta_estimate)**2 * post, theta_grid)
+    if var < 0 and var > -1e-12:
+        var = 0.0
+    return np.sqrt(var)
+
+
+def all_ability_se(responses_matrix, item_params, theta_estimates, prior_mean=0, prior_std=1,
+                   theta_min=-6, theta_max=6, num_points=1001):
+    ses = []
+    for responses, theta_est in zip(responses_matrix, theta_estimates):
+        se = ability_se(responses, item_params, theta_est, prior_mean, prior_std,
+                        theta_min, theta_max, num_points)
+        ses.append(se)
+    return np.array(ses)
+
+def item_se(a, b, prior_mean=0, prior_std=1, theta_min=-6, theta_max=6, num_points=2001, reg=1e-6):
+    """
+    Tính SE cho tham số (a,b) của một item 2PL bằng cách tính ma trận Fisher marginal:
+      I(theta) = p'(theta)^2 / (p(1-p))
+    Với p' theo a và b, sau đó tích phân theo prior(theta).
+    Trả về (se_a, se_b). Nếu ma trận Fisher kém định => trả (inf, inf).
+    """
+    theta_grid = np.linspace(theta_min, theta_max, num_points)
+    # prior normalized
+    prior = norm.pdf(theta_grid, loc=prior_mean, scale=prior_std)
+    prior /= np.trapz(prior, theta_grid)
+
+    p = 1.0 / (1.0 + np.exp(-1.702 * a * (theta_grid - b)))
+    q = 1.0 - p
+
+    dp_da = 1.702 * (theta_grid - b) * p * q          # dp/da
+    dp_db = -1.702 * a * p * q                       # dp/db
+
+    # Fisher information at each theta for binary response:
+    # I_phi = p'^2 / (p * q)
+    # So elementwise:
+    with np.errstate(divide='ignore', invalid='ignore'):
+        I_aa_theta = (dp_da ** 2) / (p * q + 1e-300)
+        I_ab_theta = (dp_da * dp_db) / (p * q + 1e-300)
+        I_bb_theta = (dp_db ** 2) / (p * q + 1e-300)
+
+    # marginalize over theta with prior
+    I_aa = np.trapz(I_aa_theta * prior, theta_grid)
+    I_ab = np.trapz(I_ab_theta * prior, theta_grid)
+    I_bb = np.trapz(I_bb_theta * prior, theta_grid)
+
+    fisher = np.array([[I_aa, I_ab], [I_ab, I_bb]])
+
+    # regularize a bit to avoid singular matrix when information ~0
+    fisher_reg = fisher + reg * np.eye(2)
+
+    try:
+        cov = np.linalg.inv(fisher_reg)
+        # if any negative diagonal due to numerical issues -> clip
+        diag = np.diag(cov).copy()
+        diag[diag < 0] = np.inf
+        se_a = np.sqrt(diag[0]) if np.isfinite(diag[0]) else np.inf
+        se_b = np.sqrt(diag[1]) if np.isfinite(diag[1]) else np.inf
+    except np.linalg.LinAlgError:
+        se_a, se_b = np.inf, np.inf
+
+    return se_a, se_b
+
+def all_item_se(item_params, prior_mean=0, prior_std=1,
+                theta_min=-6, theta_max=6, num_points=2001, reg=1e-6):
+    ses = []
+    for a, b in item_params:
+        se_a, se_b = item_se(a, b, prior_mean=prior_mean, prior_std=prior_std,
+                             theta_min=theta_min, theta_max=theta_max,
+                             num_points=num_points, reg=reg)
+        ses.append((se_a, se_b))
+    return np.array(ses)
+
+#hàm kiểm định chi-square độ phù hợp các tham số
+def chi_square_test(responses, item_params, theta_estimate, num_bins=10):
+    a, b = item_params
+    p = irt_probability(theta_estimate, a, b).ravel()  # xác suất đúng
+    q = 1 - p  # xác suất sai
+
+    # Tạo các bin dựa trên theta_estimate
+    bins = np.linspace(-6, 6, num_bins + 1)
+    bin_indices = np.digitize(theta_estimate, bins) - 1  # chỉ số bin cho mỗi thí sinh
+
+    # Khởi tạo bảng tần số
+    observed = np.zeros((num_bins, 2))  # cột 0: đúng, cột 1: sai
+    expected = np.zeros((num_bins, 2))
+
+    # Tính tần số quan sát và kỳ vọng cho mỗi bin
+    for i in range(num_bins):
+        in_bin = (bin_indices == i)
+        n_in_bin = np.sum(in_bin)
+        if n_in_bin > 0:
+            observed[i, 0] = np.sum(responses[in_bin] == 1)  # số đúng
+            observed[i, 1] = np.sum(responses[in_bin] == 0)  # số sai
+            expected[i, 0] = n_in_bin * p[in_bin].mean()     # kỳ vọng đúng
+            expected[i, 1] = n_in_bin * q[in_bin].mean()     # kỳ vọng sai
+
+    # Loại bỏ các bin có tần số kỳ vọng quá nhỏ
+    valid_bins = (expected.sum(axis=1) >= 5)
+    observed = observed[valid_bins]
+    expected = expected[valid_bins]
+
+    # Tính thống kê chi-square
+    chi2_stat = np.sum((observed - expected)**2 / (expected + 1e-9))  # tránh chia cho 0
+    df = observed.shape[0] - 2  # bậc tự do
+
+    # Tính p-value
+    p_value = 1 - chi2.cdf(chi2_stat, df)
+
+    return chi2_stat, p_value
+
+def wald_test_and_ci(estimates, ses, tail='two'):
+    """
+    Tính p-value Wald và khoảng tin cậy cho các tham số.
+    
+    estimates: dict, key = item, value = ước lượng tham số
+    ses: dict, key = item, value = SE
+    tail: 'two' hoặc 'one' (two-tailed hoặc one-tailed test)
+    
+    Trả về:
+        p_values: dict
+        cis: dict
+    """
+    p_values = {}
+    cis = {}
+    
+    for key in estimates.keys():
+        val = estimates[key]
+        err = ses[key]
+        
+        if err is not None and err > 0 and not np.isnan(err):
+            z = val / err
+            
+            # p-value
+            if tail == 'two':
+                p_values[key] = np.round(2 * (1 - norm.cdf(abs(z))), 4)
+            elif tail == 'one':
+                p_values[key] = np.round(1 - norm.cdf(z), 4)  # giả sử test H1: param > 0
+            
+            # CI 95% two-sided
+            ci_low = np.round(val - norm.ppf(0.975) * err, 4)
+            ci_high = np.round(val + norm.ppf(0.975) * err, 4)
+            cis[key] = (ci_low, ci_high)
+        else:
+            p_values[key] = np.nan
+            cis[key] = (np.nan, np.nan)
+    
+    return p_values, cis
+
+# hàm chuyển đổi điểm thực irt
+def true_score(theta, data: pd.DataFrame, a: dict, b: dict, start: int) -> float:
+    converted_score, max_score = 0.0, 0.0
+    for i in range(start, start+30):
+        if f'Cau{i}' not in data or pd.isna(data[f'Cau{i}']):
+            continue  # bỏ qua câu thiếu
+        p = irt_probability(theta, a[f'Cau{i}'], b[f'Cau{i}'])
+        if data[f'Cau{i}'] == 1:
+            converted_score += p 
+        max_score += p
+
+    # Nếu không có câu nào hợp lệ → trả về 0
+    if max_score == 0 or np.isnan(max_score):
+        return 0  
+
+    # return np.round(converted_score/max_score*300, 0).clip(0,300)
+    return np.clip(np.round(max_score*10, 0), 0, 300)

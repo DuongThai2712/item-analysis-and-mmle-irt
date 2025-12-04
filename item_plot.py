@@ -1,7 +1,6 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import textwrap
 
 
 # tách thành 4 DataFrame tương ứng với 4 phần thì, mỗi phần 30 câu hỏi
@@ -177,33 +176,3 @@ def oxy_item(ab, title):
     plt.title(title, fontsize=16)
     plt.legend(title='Dạng câu hỏi')
     plt.grid(True, alpha=0.3)
-
-def wrap_labels(ax, width=10):
-    ax.set_xticklabels(
-        ["\n".join(textwrap.wrap(t.get_text(), width)) for t in ax.get_xticklabels()]
-    )
-    ax.set_yticklabels(
-        ["\n".join(textwrap.wrap(t.get_text(), width)) for t in ax.get_yticklabels()]
-    )
-
-def heatmap_pair(df, col1, col2, title, cmap, order1=None, order2=None, ax=axes):
-    if order1 is not None:
-        df[col1] = pd.Categorical(df[col1], categories=order1, ordered=True)
-    if order2 is not None:
-        df[col2] = pd.Categorical(df[col2], categories=order2, ordered=True)
-
-    ct = pd.crosstab(df[col1], df[col2])
-
-    #plt.figure(figsize=(6, 6))
-    ax = sns.heatmap(ct, annot=True, fmt="d", cmap=cmap, cbar=False, ax=ax)
-
-    ax.set_title(title)
-    plt.xlabel(col2)
-    plt.ylabel(col1)
-
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=0) 
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
-    # Tự động xuống dòng
-    wrap_labels(ax, width=8)
-
-    plt.tight_layout()
