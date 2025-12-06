@@ -67,6 +67,7 @@ def draw_plot(df, col_name: str, title: str, range):
             axes[0, 0].annotate(f'{int(height)}', 
                              (p.get_x() + p.get_width() / 2., height),
                              ha='center', va='bottom', fontsize=12)
+    axes[0,0].set_xlim(range[0], range[1])
 
     sns.histplot(df[f'{col_name}TA'], bins=30, binrange=range, ax=axes[0, 1], kde=False, color="r")
     axes[0, 1].set_xlabel('Tiếng Anh')
@@ -77,6 +78,7 @@ def draw_plot(df, col_name: str, title: str, range):
             axes[0, 1].annotate(f'{int(height)}', 
                              (p.get_x() + p.get_width() / 2., height),
                              ha='center', va='bottom', fontsize=12)
+    axes[0,1].set_xlim(range[0], range[1])
 
     sns.histplot(df[f'{col_name}TO'], bins=30, binrange=range, ax=axes[1, 0], kde=False, color="orange")
     axes[1, 0].set_xlabel('Toán')
@@ -87,6 +89,7 @@ def draw_plot(df, col_name: str, title: str, range):
             axes[1, 0].annotate(f'{int(height)}', 
                              (p.get_x() + p.get_width() / 2., height),
                              ha='center', va='bottom', fontsize=12)
+    axes[1,0].set_xlim(range[0], range[1])
 
     sns.histplot(df[f'{col_name}KH'], bins=30, binrange=range, ax=axes[1, 1], kde=False, color="g")
     axes[1, 1].set_xlabel('Tư duy khoa học')
@@ -97,6 +100,7 @@ def draw_plot(df, col_name: str, title: str, range):
             axes[1, 1].annotate(f'{int(height)}', 
                              (p.get_x() + p.get_width() / 2., height),
                              ha='center', va='bottom', fontsize=12)
+    axes[1,1].set_xlim(range[0], range[1])
 
     fig.suptitle(title, fontsize=14)
     plt.tight_layout()

@@ -424,19 +424,27 @@ def wald_test_and_ci(estimates, ses, tail='two'):
     return p_values, cis
 
 # hàm chuyển đổi điểm thực irt
-def true_score(theta, data: pd.DataFrame, a: dict, b: dict, start: int) -> float:
-    converted_score, max_score = 0.0, 0.0
-    for i in range(start, start+30):
-        if f'Cau{i}' not in data or pd.isna(data[f'Cau{i}']):
-            continue  # bỏ qua câu thiếu
-        p = irt_probability(theta, a[f'Cau{i}'], b[f'Cau{i}'])
-        if data[f'Cau{i}'] == 1:
-            converted_score += p 
+def true_score(theta, data: pd.Series, item_params: pd.DataFrame) -> int:
+    converted_score = 0.0
+    max_score = 0.0
+
+    for cau in data.index:  # cau = "Cau1", "Cau2", ...
+        a = item_params.loc[cau, "a"]
+        b = item_params.loc[cau, "b"]
+
+        p = irt_probability(theta, a, b)
+        
+        if data[cau] == 1:
+            converted_score += p
+
         max_score += p
 
-    # Nếu không có câu nào hợp lệ → trả về 0
+    # Không có câu nào → trả về 0
     if max_score == 0 or np.isnan(max_score):
-        return 0  
-
-    # return np.round(converted_score/max_score*300, 0).clip(0,300)
-    return np.clip(np.round(max_score*10, 0), 0, 300)
+        return 0
+    if (theta == -6):
+        return 0
+    elif (theta == 6):
+        return 300
+    # Quy đổi điểm theo công thức bạn đang dùng
+    return int(np.round(max_score * 10, 0))
