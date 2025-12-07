@@ -151,20 +151,20 @@ def plot_item(data_1, data_2, title, order, palette, size):
             plt.gca().annotate(f'{int(height)}', (p.get_x() + p.get_width() / 2, height),
                             ha='center', va='bottom', fontsize=10)
 
-def oxy_item(ab, title):
+def oxy_item(item_params, title):
     sns.set_theme(style="whitegrid")
     plt.figure(figsize=(24, 12))
     plt.rcParams['font.family'] = 'serif'
     plt.rcParams['font.serif'] = ['Times New Roman'] 
     # Scatter plots
-    plt.scatter(y=ab['a_est'], x=ab['b_est'], color='b', label='Tiếng Việt')
-    plt.scatter(y=ab['a_est'], x=ab['b_est'], color='r', label='Tiếng Anh')
-    plt.scatter(y=ab['a_est'], x=ab['b_est'], color='orange', label='Toán')
-    plt.scatter(y=ab['a_est'], x=ab['b_est'], color='g', label='Tư duy khoa học')
+    plt.scatter(y=item_params['a'].iloc[0:30], x=item_params['b'].iloc[0:30], color='b', label='Tiếng Việt')
+    plt.scatter(y=item_params['a'].iloc[30:60], x=item_params['b'].iloc[30:60], color='r', label='Tiếng Anh')
+    plt.scatter(y=item_params['a'].iloc[60:90], x=item_params['b'].iloc[60:90], color='orange', label='Toán')
+    plt.scatter(y=item_params['a'].iloc[90:120], x=item_params['b'].iloc[90:120], color='g', label='Tư duy khoa học')
 
     # Gán nhãn số câu
-    for i in range(len(ab)):
-        plt.annotate(str(i+1), (ab['b_est'].iloc[i], ab['a_est'].iloc[i]), 
+    for i in range(len(item_params)):
+        plt.annotate(str(i+1), (item_params['b'].iloc[i], item_params['a'].iloc[i]), 
                     textcoords="offset pixels", xytext=(6, 6), ha='right')
 
     ax = plt.gca()

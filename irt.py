@@ -18,13 +18,8 @@ def cal_diff(p) -> float:
     
     return np.log((1-p)/p).clip(-6, 6)
 
+# Hàm xác suất đúng theo mô hình IRT 2PL
 def irt_probability(theta, a, b):
-    """
-    Compute P(1|theta) for 2PL model.
-    theta: (K,) or (K,1)
-    a, b: (J,)
-    Return: (K, J)
-    """
     theta = np.atleast_2d(theta).reshape(-1, 1)  # (K,1)
     a = np.asarray(a).reshape(1, -1)  # (1,J)
     b = np.asarray(b).reshape(1, -1)  # (1,J)
@@ -85,11 +80,11 @@ def log_likelihood(U, a_list, b_list, theta_grid, gh_weights, eps=1e-12):
 def mmle(U, a_init, b_init, name="MMLE", max_iter=60, K=81, tol=1e-4,
          reg=1e-2, step_size=0.3, verbose=True):
     N, J = U.shape
-    a = np.array(a_init, dtype=float).copy().clip(1e-3, 3.0)
-    b = np.array(b_init, dtype=float).copy().clip(-6.0, 6.0)
-    b = b - np.mean(b)  # chuẩn hoá b về trung bình 0
-    # a = np.ones(J, dtype=float)
-    # b = np.zeros(J, dtype=float)
+    # a = np.array(a_init, dtype=float).copy().clip(1e-3, 3.0)
+    # b = np.array(b_init, dtype=float).copy().clip(-6.0, 6.0)
+    # b = b - np.mean(b)  # chuẩn hoá b về trung bình 0
+    a = np.ones(J, dtype=float)
+    b = np.zeros(J, dtype=float)
 
     # Gauss-Hermite nodes
     theta_grid, gh_weights = np.polynomial.hermite.hermgauss(K)
@@ -348,42 +343,74 @@ def all_item_se(item_params, prior_mean=0, prior_std=1,
     return np.array(ses)
 
 #hàm kiểm định chi-square độ phù hợp các tham số
-def chi_square_test(responses, item_params, theta_estimate, num_bins=10):
-    a, b = item_params
-    p = irt_probability(theta_estimate, a, b).ravel()  # xác suất đúng
-    q = 1 - p  # xác suất sai
+def chi_square(df, item_param, num_bins=12):
+    theta = df["Theta"].to_numpy()
 
-    # Tạo các bin dựa trên theta_estimate
+    # Xác định danh sách câu hỏi chung giữa df và item_param
+    item_cols = [col for col in df.columns if col in item_param.index]
+
+    results = []
+
+    # Hàm IRT 2PL
+    def irt_prob(theta, a, b):
+        return 1 / (1 + np.exp(-1.702 * a * (theta - b)))
+
+    # Chia bins theo Theta
     bins = np.linspace(-6, 6, num_bins + 1)
-    bin_indices = np.digitize(theta_estimate, bins) - 1  # chỉ số bin cho mỗi thí sinh
+    bin_idx = np.digitize(theta, bins) - 1
 
-    # Khởi tạo bảng tần số
-    observed = np.zeros((num_bins, 2))  # cột 0: đúng, cột 1: sai
-    expected = np.zeros((num_bins, 2))
+    for item in item_cols:
+        responses = df[item].replace(-1, 0).to_numpy()  # thay -1 bằng 0
 
-    # Tính tần số quan sát và kỳ vọng cho mỗi bin
-    for i in range(num_bins):
-        in_bin = (bin_indices == i)
-        n_in_bin = np.sum(in_bin)
-        if n_in_bin > 0:
-            observed[i, 0] = np.sum(responses[in_bin] == 1)  # số đúng
-            observed[i, 1] = np.sum(responses[in_bin] == 0)  # số sai
-            expected[i, 0] = n_in_bin * p[in_bin].mean()     # kỳ vọng đúng
-            expected[i, 1] = n_in_bin * q[in_bin].mean()     # kỳ vọng sai
+        a = item_param.loc[item, "a"]
+        b = item_param.loc[item, "b"]
 
-    # Loại bỏ các bin có tần số kỳ vọng quá nhỏ
-    valid_bins = (expected.sum(axis=1) >= 5)
-    observed = observed[valid_bins]
-    expected = expected[valid_bins]
+        # Xác suất đúng/sai
+        p = irt_prob(theta, a, b)
+        q = 1 - p
+        # Tạo bảng observed / expected
+        observed = np.zeros((num_bins, 2))
+        expected = np.zeros((num_bins, 2))
 
-    # Tính thống kê chi-square
-    chi2_stat = np.sum((observed - expected)**2 / (expected + 1e-9))  # tránh chia cho 0
-    df = observed.shape[0] - 2  # bậc tự do
+        for i in range(num_bins):
+            in_bin = (bin_idx == i)
+            n_bin = np.sum(in_bin)
 
-    # Tính p-value
-    p_value = 1 - chi2.cdf(chi2_stat, df)
+            if n_bin > 0:
+                resp_bin = responses[in_bin]
 
-    return chi2_stat, p_value
+                observed[i, 0] = np.sum(resp_bin == 1)  # đúng
+                observed[i, 1] = np.sum(resp_bin == 0)  # sai
+
+                n_valid = np.sum((resp_bin == 1) | (resp_bin == 0))
+                mask_valid = (resp_bin != -1)
+                if mask_valid.sum() > 0:
+                    expected[i, 0] = n_valid * p[in_bin][mask_valid].mean()
+                    expected[i, 1] = n_valid * q[in_bin][mask_valid].mean()
+                else:
+                    expected[i, 0] = 0
+                    expected[i, 1] = 0
+
+        # Loại bin có expected < 5
+        valid = expected.sum(axis=1) >= 5
+        observed_valid = observed[valid]
+        expected_valid = expected[valid]
+
+        # Nếu không đủ bin hợp lệ → bỏ item
+        if expected_valid.shape[0] == 0:
+            results.append([item, a, b, np.nan, np.nan])
+            continue
+
+        # Tính chi-square
+        chi2_stat = np.sum((observed_valid - expected_valid)**2 / (expected_valid + 1e-9))
+        df_chi = observed_valid.shape[0] - 2
+        p_value = 1 - chi2.cdf(chi2_stat, df_chi)
+
+        results.append([
+            chi2_stat,
+            round(p_value, 4)
+        ])
+    return pd.DataFrame(results, columns=["Chi2", "p_value"])
 
 def wald_test_and_ci(estimates, ses, tail='two'):
     """
