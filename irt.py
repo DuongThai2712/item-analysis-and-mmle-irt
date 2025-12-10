@@ -77,8 +77,9 @@ def log_likelihood(U, a_list, b_list, theta_grid, gh_weights, eps=1e-12):
 
     return ll
 
-def mmle(U, a_init, b_init, name="MMLE", max_iter=60, K=81, tol=1e-4,
-         reg=1e-2, step_size=0.3, verbose=True):
+# def mmle(U, a_init, b_init, name="MMLE", max_iter=60, K=81, tol=1e-4,
+#          reg=1e-2, step_size=0.3, verbose=True):
+def mmle(U, name, max_iter=60, K=81, tol=1e-4, reg=1e-2, step_size=0.3, verbose=True):
     N, J = U.shape
     # a = np.array(a_init, dtype=float).copy().clip(1e-3, 3.0)
     # b = np.array(b_init, dtype=float).copy().clip(-6.0, 6.0)
@@ -188,13 +189,10 @@ def mmle(U, a_init, b_init, name="MMLE", max_iter=60, K=81, tol=1e-4,
             a, b = a_old, b_old
             step_size *= 0.7
             if step_size < 1e-4:
-                print(f"Dừng tại Iter {it}: mean(a)={np.mean(a):.4f}, mean(b)={np.mean(b):.4f}, LL={new_ll:.6f}")
                 break
             continue
 
         if (abs(new_ll - prev_ll) < tol) and (np.max(np.abs(a - a_old)) < tol) and (np.max(np.abs(b - b_old)) < tol):
-            if verbose:
-                print(f"✅ Hội tụ tại Iter {it}.")
             break
 
         prev_ll = new_ll
