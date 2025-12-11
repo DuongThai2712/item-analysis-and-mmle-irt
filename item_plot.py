@@ -1,7 +1,9 @@
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+from statsmodels.nonparametric.smoothers_lowess import lowess
+from pygam import GAM, s
 
 # tách thành 4 DataFrame tương ứng với 4 phần thì, mỗi phần 30 câu hỏi
 def tach_phan(df_chamdiem):
@@ -180,3 +182,19 @@ def oxy_item(item_params, title):
     plt.title(title, fontsize=16)
     plt.legend(title='Dạng câu hỏi')
     plt.grid(True, alpha=0.3)
+
+def plot_one(ax, theta, right, title_txt, color:str):
+        ax.scatter(theta, right, color=color, alpha=0.3)
+        gam = GAM(s(0, n_splines=20)).fit(theta, right)
+        # theta_grid = np.linspace(theta.min(), theta.max(), 300).reshape(-1, 1)
+        theta_grid = np.linspace(-6, 6, 400).reshape(-1, 1)
+        raw_pred = gam.predict(theta_grid)         
+        # vẽ đường cong fit
+        # ax.plot(smoothed[:,0], smoothed[:,1], linewidth=2, color='black')
+        ax.plot(theta_grid, raw_pred, linewidth=2, color=color)
+
+        ax.set_title(title_txt)
+        ax.set_xlabel("Năng lực θ")
+        ax.set_ylabel("Điểm thô")
+        ax.set_xlim(-6, 6)
+        ax.set_ylim(0, 32)
