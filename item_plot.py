@@ -194,7 +194,7 @@ def plot_one(ax, theta, right, title_txt, color:str):
         ax.plot(theta_grid, raw_pred, linewidth=2, color=color)
 
         ax.set_title(title_txt)
-        ax.set_xlabel("Năng lực θ")
+        ax.set_xlabel("Theta")
         ax.set_ylabel("Điểm thô")
         ax.set_xlim(-6, 6)
         ax.set_ylim(0, 32)
