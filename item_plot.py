@@ -198,3 +198,14 @@ def plot_one(ax, theta, right, title_txt, color:str):
         ax.set_ylabel("Điểm thô")
         ax.set_xlim(-6, 6)
         ax.set_ylim(0, 32)
+
+def draw_box_plot(data_1, data_2, x, y, pallete_1, pallete_2, title):
+    fig, axes = plt.subplots(ncols=2, figsize=(12, 6))
+    sns.boxplot(data=data_1, x=x, y=y, palette=pallete_1, ax=axes[0])
+    axes[0].set_title('Đề 1')
+    axes[0].set_xlabel(None)
+    sns.boxplot(data=data_2, x=x, y=y, palette=pallete_2, ax=axes[1])
+    axes[1].set_title('Đề 2')
+    axes[1].set_xlabel(None)
+    plt.suptitle(title, fontsize=14, y=0.98)
+    plt.show()
