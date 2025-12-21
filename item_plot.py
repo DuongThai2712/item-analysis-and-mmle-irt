@@ -57,7 +57,7 @@ def draw_plot(df, col_name: str, title: str, range):
     sns.set_theme(style="whitegrid")
     plt.rcParams['font.family'] = 'serif'  # or 'sans-serif', 'monospace', 'cursive', 'fantasy'
     plt.rcParams['font.serif'] = ['Times New Roman'] 
-    fig, axes = plt.subplots(ncols=2, nrows=2, figsize=(16, 9))
+    fig, axes = plt.subplots(ncols=2, nrows=2, figsize=(16, 8))
 
     sns.histplot(df[f'{col_name}TV'], bins=30, binrange=range, ax=axes[0, 0], kde=False, color="b")
     axes[0, 0].set_xlabel('Tiếng Việt')
@@ -183,20 +183,20 @@ def oxy_item(item_params, title):
     plt.legend(title='Dạng câu hỏi')
     plt.grid(True, alpha=0.3)
 
-def plot_one(ax, theta, right, title_txt, color:str):
+def plot_one(ax, theta, right, title_txt, color:str, lim_low, lim_high):
         ax.scatter(theta, right, color=color, alpha=0.3)
         gam = GAM(s(0, n_splines=20)).fit(theta, right)
         # theta_grid = np.linspace(theta.min(), theta.max(), 300).reshape(-1, 1)
-        theta_grid = np.linspace(-6, 6, 400).reshape(-1, 1)
-        raw_pred = gam.predict(theta_grid)         
+        pred_grid = np.linspace(lim_low, lim_high, 1000).reshape(-1, 1)
+        raw_pred = gam.predict(pred_grid)         
         # vẽ đường cong fit
         # ax.plot(smoothed[:,0], smoothed[:,1], linewidth=2, color='black')
-        ax.plot(theta_grid, raw_pred, linewidth=2, color=color)
+        ax.plot(pred_grid, raw_pred, linewidth=2, color=color)
 
         ax.set_title(title_txt)
         ax.set_xlabel("Theta")
         ax.set_ylabel("Điểm thô")
-        ax.set_xlim(-6, 6)
+        ax.set_xlim(lim_low,lim_high)
         ax.set_ylim(0, 32)
 
 def draw_box_plot(data_1, data_2, x, y, pallete_1, pallete_2, title):
