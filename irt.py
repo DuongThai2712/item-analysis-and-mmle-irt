@@ -84,73 +84,111 @@ def log_likelihood(U, a_list, b_list, theta_grid, gh_weights, eps=1e-12):
 #          reg=1e-2, step_size=0.3, verbose=True):
 def mmle(U, name, max_iter=60, K=81, tol=1e-4, reg=1e-2, step_size=0.3, verbose=True):
     N, J = U.shape
+    # a = np.array(a_init, dtype=float).copy().clip(1e-3, 3.0)
+    # b = np.array(b_init, dtype=float).copy().clip(-6.0, 6.0)
+    # b = b - np.mean(b)  # chuẩn hoá b về trung bình 0
     a = np.ones(J, dtype=float)
-    # Init b tốt hơn từ mean responses
-    mask = (U != -1).astype(float)
-    prop = np.sum(mask * U, axis=0) / np.sum(mask, axis=0).clip(1e-3)
-    prop = np.clip(prop, 0.01, 0.99)
-    b = -np.log(1 / prop - 1) / (1.702 * a)  # Init b từ logit
+    b = np.zeros(J, dtype=float)
 
-    theta_grid, gh_weights = herm.hermgauss(K)
-    theta_grid = theta_grid * np.sqrt(2)
+    # Gauss-Hermite nodes
+    theta_grid, gh_weights = np.polynomial.hermite.hermgauss(K)
+    theta_grid = theta_grid * np.sqrt(2)         # đúng chuẩn GH
     gh_weights = gh_weights / np.sqrt(np.pi)
 
+
     prev_ll = -np.inf
+    mask = (U != -1)
 
     if verbose:
         print(f"Start {name}: N={N}, J={J}, K={K}")
 
     for it in range(1, max_iter + 1):
-        # E-step vectorized
+        # --- E-step ---
         P_kj = irt_probability(theta_grid, a, b)
-        P_kj = np.clip(P_kj, 1e-12, 1 - 1e-12)
+        P_kj = np.clip(P_kj, 1e-12, 1-1e-12)
         logP = np.log(P_kj)
-        log1mP = np.log(1 - P_kj)
-        L = np.einsum('nj,kj->nk', mask * U, logP) + np.einsum('nj,kj->nk', mask * (1 - U), log1mP)
-        L += np.log(gh_weights + 1e-12)[None, :]
+        log1mP = np.log1p(-P_kj)
+
+        L = np.zeros((N, K))
+        for k in range(K):
+            L[:, k] = (mask * U) @ logP[k, :].T + (mask * (1 - U)) @ log1mP[k, :].T
+            L[:, k] += np.log(gh_weights[k] + 1e-12)
+
         denom = logsumexp(L, axis=1)
         W = np.exp(L - denom[:, None])
+
         if verbose:
             print(f"Iter {it}: LL = {np.sum(denom):.2f}")
 
         a_old, b_old = a.copy(), b.copy()
 
-        # M-step
+        # --- M-step ---
+        theta_k = theta_grid.reshape(K, 1)
         for j in range(J):
-            if np.sum(mask[:, j]) < 10:  # Bỏ item ít data
+            col = U[:, j]
+            valid_idx = np.where(col != -1)[0]
+            if valid_idx.size == 0:
                 continue
-            u_vec = U[:, j][:, None].astype(float)
+            prop = np.mean(col[valid_idx])
+            # Thay continue bằng điều chỉnh P để tránh log(0), không bỏ item
+            if prop < 0.01:
+                prop = 0.01
+            elif prop > 0.99:
+                prop = 0.99
+
+            u_vec = col[:, None]
             mask_vec = mask[:, j][:, None]
-            P_kj_vec = P_kj[:, j].reshape(1, K)
+            P_kj_vec = P_kj[:, j].reshape(1, K) # test thử, lỗi
 
             for _inner in range(2):
-                D_mat = (u_vec - P_kj_vec) * mask_vec  # (N, K)
-                term_theta = (theta_grid - b[j]).reshape(1, K)
+                D = (u_vec @ np.ones((1, K))) - P_kj_vec  # (N, K)
+                D = D * mask_vec                          # mask theo rows
+                term_theta = theta_k - b[j]
 
-                grad_a = np.sum(D_mat * (1.702 * term_theta) * W) - reg * (a[j] - 1.0)
-                grad_b = np.sum(D_mat * (-a[j] * 1.702) * W) - reg * b[j]
+                grad_a = np.sum(W * D * (1.702 * term_theta).T) - reg * (a[j] - 1.0)
+                grad_b = np.sum(W * D * (-a[j] * 1.702)) - reg * b[j]
 
-                q = (P_kj_vec * (1 - P_kj_vec)).reshape(1, K)
-                hess_aa = -np.sum(q * (1.702 * term_theta)**2 * W) - 1e-5
-                hess_ab = -np.sum(q * (1.702 * term_theta) * (-1.702 * a[j]) * W)
-                hess_bb = -np.sum(q * (1.702 * a[j])**2 * W) - 1e-5
+                # q_k = P_kj_vec * (1 - P_kj_vec)
+                # q_k = (P_kj_vec * (1 - P_kj_vec)).reshape(1, K)   # (1, K)
+                # # thêm reg nhỏ trực tiếp vào Hessian
+                # hess_aa = -np.sum(W * (q_k.T * (1.702 * term_theta).T ** 2)) - 1e-5
+                # hess_ab = -np.sum(W * (q_k.T * 1.702**2 * term_theta.T))
+                # hess_bb = -np.sum(W * (q_k.T * (a[j]*1.702)**2)) - 1e-5
+                # q_k: (K,)
+                q_k = (P_kj_vec.flatten() * (1 - P_kj_vec.flatten()))  # (K,)
 
-                # I = -H (positive definite)
-                I = np.array([[-hess_aa, -hess_ab], [-hess_ab, -hess_bb]])
+                # (1, K) để broadcast với W (N, K)
+                q = q_k.reshape(1, K)
+                tt = term_theta.flatten().reshape(1, K)
+
+                # Hessian cho a
+                hess_aa = -np.sum(W * (q * (1.702 * tt)**2)) - 1e-5
+
+                # Hessian cho cross-term ab
+                hess_ab = -np.sum(W * (q * (1.702 * tt) * (1.702 * a[j])))
+
+                # Hessian cho b
+                hess_bb = -np.sum(W * (q * (1.702 * a[j])**2)) - 1e-5
+
+                I = -np.array([[hess_aa, hess_ab], [hess_ab, hess_bb]])
                 I_reg = I + reg * np.eye(2)
                 g = np.array([grad_a, grad_b])
 
                 try:
                     delta = np.linalg.solve(I_reg, g)
                 except np.linalg.LinAlgError:
-                    delta = 1e-3 * g / np.linalg.norm(g).clip(1e-3)
+                    delta = 1e-3 * g
 
-                delta[0] = np.clip(delta[0], -0.15, 0.15)
-                delta[1] = np.clip(delta[1], -0.30, 0.30)
+                max_step_a = 0.15
+                max_step_b = 0.30
+
+                delta[0] = np.clip(delta[0], -max_step_a, max_step_a)
+                delta[1] = np.clip(delta[1], -max_step_b, max_step_b)
 
                 a[j] = np.clip(a[j] + step_size * delta[0], 1e-3, 3.0)
                 b[j] = np.clip(b[j] + step_size * delta[1], -6.0, 6.0)
 
+        # --- check LL & convergence ---
         new_ll = log_likelihood(U, a, b, theta_grid, gh_weights)
 
         if new_ll < prev_ll - 1e-6:
@@ -160,16 +198,13 @@ def mmle(U, name, max_iter=60, K=81, tol=1e-4, reg=1e-2, step_size=0.3, verbose=
                 break
             continue
 
-        if abs(new_ll - prev_ll) < tol and np.max(np.abs(a - a_old)) < tol and np.max(np.abs(b - b_old)) < tol:
+        if (abs(new_ll - prev_ll) < tol) and (np.max(np.abs(a - a_old)) < tol) and (np.max(np.abs(b - b_old)) < tol):
             break
 
         prev_ll = new_ll
-
-    # Chuẩn hóa b về mean 0
-    b -= np.mean(b)
+        
 
     return a, b
-
 
 def theta_estimate(responses, item_params):
     theta_estimates = []
