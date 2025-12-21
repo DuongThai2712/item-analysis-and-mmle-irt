@@ -3,6 +3,9 @@ import pandas as pd
 from scipy.special import logsumexp
 from scipy.optimize import minimize
 from scipy.stats import norm, chi2
+from scipy.integrate import quad
+from scipy.special import hermite
+import numpy.polynomial.hermite as herm
 
 # Hàm tính độ phân biệt bằng point-biserial correlation
 def cal_disc(r):
@@ -81,108 +84,73 @@ def log_likelihood(U, a_list, b_list, theta_grid, gh_weights, eps=1e-12):
 #          reg=1e-2, step_size=0.3, verbose=True):
 def mmle(U, name, max_iter=60, K=81, tol=1e-4, reg=1e-2, step_size=0.3, verbose=True):
     N, J = U.shape
-    # a = np.array(a_init, dtype=float).copy().clip(1e-3, 3.0)
-    # b = np.array(b_init, dtype=float).copy().clip(-6.0, 6.0)
-    # b = b - np.mean(b)  # chuẩn hoá b về trung bình 0
     a = np.ones(J, dtype=float)
-    b = np.zeros(J, dtype=float)
+    # Init b tốt hơn từ mean responses
+    mask = (U != -1).astype(float)
+    prop = np.sum(mask * U, axis=0) / np.sum(mask, axis=0).clip(1e-3)
+    prop = np.clip(prop, 0.01, 0.99)
+    b = -np.log(1 / prop - 1) / (1.702 * a)  # Init b từ logit
 
-    # Gauss-Hermite nodes
-    theta_grid, gh_weights = np.polynomial.hermite.hermgauss(K)
-    theta_grid = theta_grid * np.sqrt(2)         # đúng chuẩn GH
+    theta_grid, gh_weights = herm.hermgauss(K)
+    theta_grid = theta_grid * np.sqrt(2)
     gh_weights = gh_weights / np.sqrt(np.pi)
 
-
     prev_ll = -np.inf
-    mask = (U != -1)
 
     if verbose:
         print(f"Start {name}: N={N}, J={J}, K={K}")
 
     for it in range(1, max_iter + 1):
-        # --- E-step ---
+        # E-step vectorized
         P_kj = irt_probability(theta_grid, a, b)
-        P_kj = np.clip(P_kj, 1e-12, 1-1e-12)
+        P_kj = np.clip(P_kj, 1e-12, 1 - 1e-12)
         logP = np.log(P_kj)
-        log1mP = np.log1p(-P_kj)
-
-        L = np.zeros((N, K))
-        for k in range(K):
-            L[:, k] = (mask * U) @ logP[k, :].T + (mask * (1 - U)) @ log1mP[k, :].T
-            L[:, k] += np.log(gh_weights[k] + 1e-12)
-
+        log1mP = np.log(1 - P_kj)
+        L = np.einsum('nj,kj->nk', mask * U, logP) + np.einsum('nj,kj->nk', mask * (1 - U), log1mP)
+        L += np.log(gh_weights + 1e-12)[None, :]
         denom = logsumexp(L, axis=1)
         W = np.exp(L - denom[:, None])
+        if verbose:
+            print(f"Iter {it}: LL = {np.sum(denom):.2f}")
 
         a_old, b_old = a.copy(), b.copy()
 
-        # --- M-step ---
-        theta_k = theta_grid.reshape(K, 1)
+        # M-step
         for j in range(J):
-            col = U[:, j]
-            valid_idx = np.where(col != -1)[0]
-            if valid_idx.size == 0:
+            if np.sum(mask[:, j]) < 10:  # Bỏ item ít data
                 continue
-            prop = np.mean(col[valid_idx])
-            # Thay continue bằng điều chỉnh P để tránh log(0), không bỏ item
-            if prop < 0.01:
-                prop = 0.01
-            elif prop > 0.99:
-                prop = 0.99
-
-            u_vec = col[:, None]
+            u_vec = U[:, j][:, None].astype(float)
             mask_vec = mask[:, j][:, None]
-            P_kj_vec = P_kj[:, j].reshape(1, K) # test thử, lỗi
+            P_kj_vec = P_kj[:, j].reshape(1, K)
 
             for _inner in range(2):
-                D = (u_vec @ np.ones((1, K))) - P_kj_vec  # (N, K)
-                D = D * mask_vec                          # mask theo rows
-                term_theta = theta_k - b[j]
+                D_mat = (u_vec - P_kj_vec) * mask_vec  # (N, K)
+                term_theta = (theta_grid - b[j]).reshape(1, K)
 
-                grad_a = np.sum(W * D * (1.702 * term_theta).T) - reg * (a[j] - 1.0)
-                grad_b = np.sum(W * D * (-a[j] * 1.702)) - reg * b[j]
+                grad_a = np.sum(D_mat * (1.702 * term_theta) * W) - reg * (a[j] - 1.0)
+                grad_b = np.sum(D_mat * (-a[j] * 1.702) * W) - reg * b[j]
 
-                # q_k = P_kj_vec * (1 - P_kj_vec)
-                # q_k = (P_kj_vec * (1 - P_kj_vec)).reshape(1, K)   # (1, K)
-                # # thêm reg nhỏ trực tiếp vào Hessian
-                # hess_aa = -np.sum(W * (q_k.T * (1.702 * term_theta).T ** 2)) - 1e-5
-                # hess_ab = -np.sum(W * (q_k.T * 1.702**2 * term_theta.T))
-                # hess_bb = -np.sum(W * (q_k.T * (a[j]*1.702)**2)) - 1e-5
-                # q_k: (K,)
-                q_k = (P_kj_vec.flatten() * (1 - P_kj_vec.flatten()))  # (K,)
+                q = (P_kj_vec * (1 - P_kj_vec)).reshape(1, K)
+                hess_aa = -np.sum(q * (1.702 * term_theta)**2 * W) - 1e-5
+                hess_ab = -np.sum(q * (1.702 * term_theta) * (-1.702 * a[j]) * W)
+                hess_bb = -np.sum(q * (1.702 * a[j])**2 * W) - 1e-5
 
-                # (1, K) để broadcast với W (N, K)
-                q = q_k.reshape(1, K)
-                tt = term_theta.flatten().reshape(1, K)
-
-                # Hessian cho a
-                hess_aa = -np.sum(W * (q * (1.702 * tt)**2)) - 1e-5
-
-                # Hessian cho cross-term ab
-                hess_ab = -np.sum(W * (q * (1.702 * tt) * (1.702 * a[j])))
-
-                # Hessian cho b
-                hess_bb = -np.sum(W * (q * (1.702 * a[j])**2)) - 1e-5
-
-                I = -np.array([[hess_aa, hess_ab], [hess_ab, hess_bb]])
+                # I = -H (positive definite)
+                I = np.array([[-hess_aa, -hess_ab], [-hess_ab, -hess_bb]])
                 I_reg = I + reg * np.eye(2)
                 g = np.array([grad_a, grad_b])
 
                 try:
                     delta = np.linalg.solve(I_reg, g)
                 except np.linalg.LinAlgError:
-                    delta = 1e-3 * g
+                    delta = 1e-3 * g / np.linalg.norm(g).clip(1e-3)
 
-                max_step_a = 0.15
-                max_step_b = 0.30
-
-                delta[0] = np.clip(delta[0], -max_step_a, max_step_a)
-                delta[1] = np.clip(delta[1], -max_step_b, max_step_b)
+                delta[0] = np.clip(delta[0], -0.15, 0.15)
+                delta[1] = np.clip(delta[1], -0.30, 0.30)
 
                 a[j] = np.clip(a[j] + step_size * delta[0], 1e-3, 3.0)
                 b[j] = np.clip(b[j] + step_size * delta[1], -6.0, 6.0)
 
-        # --- check LL & convergence ---
         new_ll = log_likelihood(U, a, b, theta_grid, gh_weights)
 
         if new_ll < prev_ll - 1e-6:
@@ -192,13 +160,16 @@ def mmle(U, name, max_iter=60, K=81, tol=1e-4, reg=1e-2, step_size=0.3, verbose=
                 break
             continue
 
-        if (abs(new_ll - prev_ll) < tol) and (np.max(np.abs(a - a_old)) < tol) and (np.max(np.abs(b - b_old)) < tol):
+        if abs(new_ll - prev_ll) < tol and np.max(np.abs(a - a_old)) < tol and np.max(np.abs(b - b_old)) < tol:
             break
 
         prev_ll = new_ll
-        
+
+    # Chuẩn hóa b về mean 0
+    b -= np.mean(b)
 
     return a, b
+
 
 def theta_estimate(responses, item_params):
     theta_estimates = []
@@ -282,17 +253,23 @@ def all_ability_se(responses_matrix, item_params, theta_estimates, prior_mean=0,
         ses.append(se)
     return np.array(ses)
 
-def item_se(a, b, prior_mean=0, prior_std=1, theta_min=-6, theta_max=6, num_points=2001, reg=1e-6):
+# def item_se(a, b, prior_mean=0, prior_std=1, theta_min=-6, theta_max=6, num_points=2001, reg=1e-6):
+def item_se(a, b, prior_mean=0, prior_std=1, theta_min=-6, theta_max=6, num_quad=50, reg=1e-6):
     """
     Tính SE cho tham số (a,b) của một item 2PL bằng cách tính ma trận Fisher marginal:
       I(theta) = p'(theta)^2 / (p(1-p))
     Với p' theo a và b, sau đó tích phân theo prior(theta).
     Trả về (se_a, se_b). Nếu ma trận Fisher kém định => trả (inf, inf).
     """
-    theta_grid = np.linspace(theta_min, theta_max, num_points)
-    # prior normalized
-    prior = norm.pdf(theta_grid, loc=prior_mean, scale=prior_std)
-    prior /= np.trapz(prior, theta_grid)
+    # theta_grid = np.linspace(theta_min, theta_max, num_points)
+    # # prior normalized
+    # prior = norm.pdf(theta_grid, loc=prior_mean, scale=prior_std)
+    # prior /= np.trapz(prior, theta_grid)
+
+    # Sử dụng tích phân Gauss-Hermite (n điểm) cho prior normal
+    nodes, weights = herm.hermgauss(num_quad)  # nút trong không gian normal chuẩn
+    theta_grid = prior_mean + np.sqrt(2) * prior_std * nodes  # tỷ lệ đến N(mean, std^2)
+    prior = weights / np.sqrt(np.pi)  # chuẩn hóa cho mật độ
 
     p = 1.0 / (1.0 + np.exp(-1.702 * a * (theta_grid - b)))
     q = 1.0 - p
@@ -309,9 +286,13 @@ def item_se(a, b, prior_mean=0, prior_std=1, theta_min=-6, theta_max=6, num_poin
         I_bb_theta = (dp_db ** 2) / (p * q + 1e-300)
 
     # marginalize over theta with prior
-    I_aa = np.trapz(I_aa_theta * prior, theta_grid)
-    I_ab = np.trapz(I_ab_theta * prior, theta_grid)
-    I_bb = np.trapz(I_bb_theta * prior, theta_grid)
+    # I_aa = np.trapz(I_aa_theta * prior, theta_grid)
+    # I_ab = np.trapz(I_ab_theta * prior, theta_grid)
+    # I_bb = np.trapz(I_bb_theta * prior, theta_grid)
+
+    I_aa = np.sum(I_aa_theta * prior)
+    I_ab = np.sum(I_ab_theta * prior)
+    I_bb = np.sum(I_bb_theta * prior)
 
     fisher = np.array([[I_aa, I_ab], [I_ab, I_bb]])
 
@@ -331,12 +312,12 @@ def item_se(a, b, prior_mean=0, prior_std=1, theta_min=-6, theta_max=6, num_poin
     return se_a, se_b
 
 def all_item_se(item_params, prior_mean=0, prior_std=1,
-                theta_min=-6, theta_max=6, num_points=2001, reg=1e-6):
+                theta_min=-6, theta_max=6, num_quad=50, reg=1e-6):
     ses = []
     for a, b in item_params:
         se_a, se_b = item_se(a, b, prior_mean=prior_mean, prior_std=prior_std,
                              theta_min=theta_min, theta_max=theta_max,
-                             num_points=num_points, reg=reg)
+                             num_quad=num_quad, reg=reg)
         ses.append((se_a, se_b))
     return np.array(ses)
 
@@ -410,46 +391,10 @@ def chi_square(df, item_param, num_bins=12):
         ])
     return pd.DataFrame(results, columns=["Chi2", "p_value"])
 
-def wald_test_and_ci(estimates, ses, tail='two'):
-    """
-    Tính p-value Wald và khoảng tin cậy cho các tham số.
-    
-    estimates: dict, key = item, value = ước lượng tham số
-    ses: dict, key = item, value = SE
-    tail: 'two' hoặc 'one' (two-tailed hoặc one-tailed test)
-    
-    Trả về:
-        p_values: dict
-        cis: dict
-    """
-    p_values = {}
-    cis = {}
-    
-    for key in estimates.keys():
-        val = estimates[key]
-        err = ses[key]
-        
-        if err is not None and err > 0 and not np.isnan(err):
-            z = val / err
-            
-            # p-value
-            if tail == 'two':
-                p_values[key] = np.round(2 * (1 - norm.cdf(abs(z))), 4)
-            elif tail == 'one':
-                p_values[key] = np.round(1 - norm.cdf(z), 4)  # giả sử test H1: param > 0
-            
-            # CI 95% two-sided
-            ci_low = np.round(val - norm.ppf(0.975) * err, 4)
-            ci_high = np.round(val + norm.ppf(0.975) * err, 4)
-            cis[key] = (ci_low, ci_high)
-        else:
-            p_values[key] = np.nan
-            cis[key] = (np.nan, np.nan)
-    
-    return p_values, cis
+
 
 # hàm chuyển đổi điểm thực irt
-def true_score(theta, data: pd.Series, item_params: pd.DataFrame) -> int:
+def true_score(theta, raw, data: pd.Series, item_params: pd.DataFrame) -> int:
     converted_score = 0.0
     max_score = 0.0
 
@@ -464,12 +409,11 @@ def true_score(theta, data: pd.Series, item_params: pd.DataFrame) -> int:
 
         max_score += p
 
-    # Không có câu nào → trả về 0
+    # Không có câu nào trả lời thi trả về 0
     if max_score == 0 or np.isnan(max_score):
         return 0
-    if (theta == -6):
+    if (theta == -6 and raw==0):    # theta đáy + raw=0 thì trả về 0
         return 0
-    elif (theta == 6):
+    elif (theta == 6 and raw==30): # theta đáy + raw=30 thì trả về 300
         return 300
-    # Quy đổi điểm theo công thức bạn đang dùng
-    return int(np.round(max_score * 10, 0))
+    return int(np.clip(np.round(max_score * 10, 0), 0, 300))
