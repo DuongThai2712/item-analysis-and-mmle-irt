@@ -129,7 +129,7 @@ def plot_total(data: pd.DataFrame, range, title: str, xlabel: str, ylabel: str, 
     plt.ylabel(ylabel)
     plt.xlim(lim[0], lim[1])
 
-def plot_item(data_1, data_2, title, order, palette, size):
+def plot_item(data_1, data_2, data_3, title, order, palette, size):
     sns.set_style("whitegrid")
     plt.rcParams['font.family'] = 'serif'
     plt.rcParams['font.serif'] = ['Times New Roman'] 
@@ -137,21 +137,40 @@ def plot_item(data_1, data_2, title, order, palette, size):
 
     data1 = data_1.copy()
     data2 = data_2.copy()
+    data3 = data_3.copy()
 
     data1["Đề"] = "Đề 1"
     data2["Đề"] = "Đề 2"
-    merged = pd.concat([data1, data2], ignore_index=True)
-    sns.countplot(data=merged, x='Phân loại', palette=palette, order=order, hue='Đề')
+    data3["Đề"] = "Đề 3"
+
+    merged = pd.concat([data1, data2, data3], ignore_index=True)
+
+    sns.countplot(
+        data=merged, 
+        x='Phân loại', 
+        palette=palette, 
+        order=order, 
+        hue='Đề'
+    )
+
     plt.title(title, fontsize=14)
     plt.xlabel(None)
     plt.ylabel('Số lượng')
 
-    #thêm nhãn trên mỗi cột
+    # thêm nhãn trên mỗi cột
     for p in plt.gca().patches:
         height = p.get_height()
-        if height >0:
-            plt.gca().annotate(f'{int(height)}', (p.get_x() + p.get_width() / 2, height),
-                            ha='center', va='bottom', fontsize=10)
+        if height > 0:
+            plt.gca().annotate(
+                f'{int(height)}',
+                (p.get_x() + p.get_width() / 2, height),
+                ha='center',
+                va='bottom',
+                fontsize=10
+            )
+
+    plt.tight_layout()
+    plt.show()
 
 def oxy_item(item_params, title):
     sns.set_theme(style="whitegrid")
@@ -199,13 +218,24 @@ def plot_one(ax, theta, right, title_txt, color:str, lim_low, lim_high):
         ax.set_xlim(lim_low,lim_high)
         ax.set_ylim(0, 32)
 
-def draw_box_plot(data_1, data_2, x, y, pallete_1, pallete_2, title):
-    fig, axes = plt.subplots(ncols=2, figsize=(12, 6))
+def draw_box_plot(data_1, data_2, data_3, x, y, pallete_1, pallete_2, pallete_3, title):
+    fig, axes = plt.subplots(ncols=3, figsize=(18, 6))
+
+    # Đề 1
     sns.boxplot(data=data_1, x=x, y=y, palette=pallete_1, ax=axes[0])
     axes[0].set_title('Đề 1')
     axes[0].set_xlabel(None)
+
+    # Đề 2
     sns.boxplot(data=data_2, x=x, y=y, palette=pallete_2, ax=axes[1])
     axes[1].set_title('Đề 2')
     axes[1].set_xlabel(None)
+
+    # Đề 3
+    sns.boxplot(data=data_3, x=x, y=y, palette=pallete_3, ax=axes[2])
+    axes[2].set_title('Đề 3')
+    axes[2].set_xlabel(None)
+
     plt.suptitle(title, fontsize=14, y=0.98)
+    plt.tight_layout()
     plt.show()
