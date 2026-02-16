@@ -16,5 +16,5 @@ Repository of item analysis and MMLE-IRT for my own V-ACT practice tests
 
   * `main.ipynb`: conducts the result analysis
 
-**Notes:** We cannot provide students' responses since they contains real information.
+**Notes:** We cannot provide students' responses and survey file since they contain real information.
 
