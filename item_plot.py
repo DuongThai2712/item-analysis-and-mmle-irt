@@ -20,31 +20,133 @@ def tinh_diem(df_chamdiem):
     df_chamdiem['Null'] = df_chamdiem[[f'{i}' for i in df_chamdiem.columns if i.startswith('Cau')]].apply(lambda x: sum(x == -1), axis=1)
     return df_chamdiem
 
+# # Hàm chuyển đổi đáp án thành giá trị (0 là sai hoặc không làm, 1 là đúng, -1 là trống)
+# def chamDiem(x, answer):
+#     ma_de = x['MaDe']
+#     row = answer.loc[answer['MaDe'] == ma_de]
+    
+#     for i in range(1, 121):
+#         thi_sinh_dap_an = str(x.get(f'Cau{i}', '')).strip().upper()
+        
+#         # Lấy đáp án đúng nếu tồn tại
+#         if not row.empty:
+#             dap_an_dung = str(row.iloc[0].get(f'Cau{i}', '')).strip().upper()
+#         else:
+#             dap_an_dung = ''
+
+#         # Xử lý các trường hợp đặc biệt
+#         if pd.isna(dap_an_dung):     # Xử lý chặn trên và sai đề
+#             x[f'Cau{i}'] = 1
+#         elif pd.isna(x[f'Cau{i}']): # xử lý bỏ trống câu hỏi
+#             x[f'Cau{i}'] = -1
+#         else:
+#             # Tách các đáp án đúng theo dấu /
+#             cac_dap_an = [da.strip() for da in dap_an_dung.split('/')]
+#             # Xử lý kết quả bài làm
+#             x[f'Cau{i}'] = 1 if thi_sinh_dap_an in cac_dap_an else 0
+
+#     return x
+
 # Hàm chuyển đổi đáp án thành giá trị (0 là sai hoặc không làm, 1 là đúng, -1 là trống)
 def chamDiem(x, answer):
     ma_de = x['MaDe']
     row = answer.loc[answer['MaDe'] == ma_de]
     
-    for i in range(1, 121):
-        thi_sinh_dap_an = str(x.get(f'Cau{i}', '')).strip().upper()
+    # Kiểm tra xem đáp án có dùng định dạng [STT]-[Đáp án] không
+    is_multi_format = False
+    position_map = {}  # {stt_cau_goc: dap_an_dung}
+    
+    if not row.empty:
+        # Kiểm tra ô đầu tiên có dữ liệu
+        for i in range(1, 121):
+            cell_val = str(row.iloc[0].get(f'Cau{i}', '')).strip()
+            if '-' in cell_val:
+                is_multi_format = True
+                break
+    
+    if is_multi_format and not row.empty:
+        # Parse toàn bộ đáp án: mỗi ô có dạng "STT-ĐÁP_ÁN"
+        # Cau{i} trong file đáp án = vị trí thứ i trong đề này
+        # Giá trị = "STT_GỐC-ĐÁP_ÁN"
+        col_to_original = {}  # {col_index_trong_de_nay: (stt_goc, dap_an)}
+        for i in range(1, 121):
+            cell_val = str(row.iloc[0].get(f'Cau{i}', '')).strip()
+            if '-' in cell_val:
+                parts = cell_val.split('-', 1)
+                try:
+                    stt_goc = int(parts[0].strip())
+                    dap_an = parts[1].strip().upper()
+                    col_to_original[i] = (stt_goc, dap_an)
+                except (ValueError, IndexError):
+                    col_to_original[i] = (i, '')
+            elif cell_val and cell_val != 'NAN':
+                col_to_original[i] = (i, cell_val.upper())
+            else:
+                col_to_original[i] = (i, '')
         
-        # Lấy đáp án đúng nếu tồn tại
-        if not row.empty:
-            dap_an_dung = str(row.iloc[0].get(f'Cau{i}', '')).strip().upper()
-        else:
-            dap_an_dung = ''
-
-        # Xử lý các trường hợp đặc biệt
-        if pd.isna(dap_an_dung):     # Xử lý chặn trên và sai đề
-            x[f'Cau{i}'] = 1
-        elif pd.isna(x[f'Cau{i}']): # xử lý bỏ trống câu hỏi
-            x[f'Cau{i}'] = -1
-        else:
-            # Tách các đáp án đúng theo dấu /
-            cac_dap_an = [da.strip() for da in dap_an_dung.split('/')]
-            # Xử lý kết quả bài làm
-            x[f'Cau{i}'] = 1 if thi_sinh_dap_an in cac_dap_an else 0
-
+        # Đọc bài làm thí sinh theo vị trí cột (Cau1..Cau120)
+        # rồi map về câu gốc để chấm
+        # Kết quả ghi vào cột theo STT GỐC
+        
+        # Thu thập đáp án thí sinh theo vị trí cột
+        thi_sinh_answers = {}  # {col_index: dap_an_thi_sinh}
+        for i in range(1, 121):
+            val = x.get(f'Cau{i}', '')
+            if pd.isna(val) or str(val).strip() == '':
+                thi_sinh_answers[i] = None
+            else:
+                thi_sinh_answers[i] = str(val).strip().upper()
+        
+        # Reset tất cả cột về -1 (mặc định bỏ trống)
+        result = {}
+        for i in range(1, 121):
+            result[i] = -1
+        
+        # Chấm điểm: duyệt theo cột đề này
+        for col_i, (stt_goc, dap_an_dung) in col_to_original.items():
+            if stt_goc < 1 or stt_goc > 120:
+                continue
+            
+            thi_sinh_dap_an = thi_sinh_answers.get(col_i)
+            
+            if not dap_an_dung or dap_an_dung == 'NAN':
+                # Không có đáp án → câu đó tất cả được điểm
+                result[stt_goc] = 1
+            elif thi_sinh_dap_an is None:
+                # Thí sinh bỏ trống
+                result[stt_goc] = -1
+            else:
+                cac_dap_an = [da.strip() for da in dap_an_dung.split('/')]
+                result[stt_goc] = 1 if thi_sinh_dap_an in cac_dap_an else 0
+        
+        # Ghi kết quả vào x theo STT GỐC
+        for stt_goc, diem in result.items():
+            x[f'Cau{stt_goc}'] = diem
+    
+    else:
+        # Định dạng cũ (1 đề, không có mapping) → dùng logic gốc
+        for i in range(1, 121):
+            thi_sinh_dap_an = str(x.get(f'Cau{i}', '')).strip().upper()
+            
+            if not row.empty:
+                dap_an_dung = str(row.iloc[0].get(f'Cau{i}', '')).strip().upper()
+            else:
+                dap_an_dung = ''
+            
+            if pd.isna(x.get(f'Cau{i}', float('nan'))) or row.empty:
+                if row.empty or pd.isna(row.iloc[0].get(f'Cau{i}', float('nan'))):
+                    x[f'Cau{i}'] = 1
+                else:
+                    x[f'Cau{i}'] = -1
+            else:
+                if not dap_an_dung or dap_an_dung == 'NAN':
+                    x[f'Cau{i}'] = 1
+                elif pd.isna(x[f'Cau{i}']):
+                    x[f'Cau{i}'] = -1
+                else:
+                    cac_dap_an = [da.strip() for da in dap_an_dung.split('/')]
+                    x[f'Cau{i}'] = 1 if thi_sinh_dap_an in cac_dap_an else 0
+    
     return x
 
 def ketQuaCham(df, answer):
