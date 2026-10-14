@@ -20,7 +20,7 @@ def cal_disc(r):
 # Tính độ khó
 def cal_diff(p) -> float:
     p = np.clip(np.asarray(p, dtype=float), 1e-6, 1 - 1e-6)
-    return np.clip(np.log((1 - p) / p), -6, 6)
+    return np.log((1 - p) / p)#np.clip(np.log((1 - p) / p), -6, 6)
 
 # Hàm xác suất đúng theo mô hình IRT 2PL
 
@@ -115,8 +115,8 @@ def _mstep_item(n_k, r_k, theta, a, b, reg, a_bounds, b_bounds, n_newton=8):
 # ----------------------------------------------------------------------
 # MMLE - EM
 # ----------------------------------------------------------------------
-def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-6, tol_param=1e-4,
-         reg=1e-2, a_bounds=(0.05, 4.0), b_bounds=(-6.0, 6.0),
+def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-4, tol_param=1e-4,
+         reg=1e-2, a_bounds=(0.05, 4.0), b_bounds=(-1e9, 1e9),
          a_init=None, b_init=None, verbose=True, return_ll=False):
     """
     Ước lượng tham số 2PL bằng MMLE-EM (Bock & Aitkin, 1981).
@@ -195,7 +195,7 @@ def _mle(Um, M, a, b):
             P = np.clip(expit(D * aa * (t - bb)), 1e-12, 1 - 1e-12)
             return -np.sum(u * np.log(P) + (1 - u) * np.log1p(-P))
  
-        res = minimize_scalar(nll, bounds=(-6, 6), method="bounded")
+        res = minimize_scalar(nll, bounds=(-10, 10), method="bounded")
         t = float(res.x)
         P = expit(D * aa * (t - bb))
         info = np.sum((D * aa) ** 2 * P * (1 - P))
@@ -320,26 +320,24 @@ def chi_square(df, item_param, theta_col="Theta", num_bins=10):
 # ----------------------------------------------------------------------
 # Điểm thực quy đổi theo đường đặc trưng đề thi (TCC)
 # ----------------------------------------------------------------------
-def true_score(theta, raw, data: pd.Series, item_params: pd.DataFrame, scale_max=300) -> int:
-    """
-    Điểm quy đổi = (điểm kỳ vọng TCC / số câu) * scale_max.
-    data       : Series đáp án 0/1/-1 của 1 thí sinh (index = tên câu)
-    item_params: DataFrame index = tên câu, cột 'a', 'b'
-    raw        : số câu đúng thô
-    """
-    items = [c for c in data.index if c in item_params.index and data[c] != MISSING
-             and np.isfinite(data[c])]
+def true_score(theta, raw, data: pd.Series, item_params: pd.DataFrame, scale_max=300):
+    if not np.isfinite(theta) or not np.isfinite(raw):
+        return np.nan
+    items = [c for c in data.index if c in item_params.index
+             and np.isfinite(data[c]) and data[c] != MISSING]
     n = len(items)
     if n == 0 or raw <= 0:
         return 0
     if raw >= n:
         return int(scale_max)
- 
+
     a = item_params.loc[items, "a"].to_numpy(float)
     b = item_params.loc[items, "b"].to_numpy(float)
-    tcc = irt_probability(float(theta), a, b).sum()          # điểm kỳ vọng
+    tcc = irt_probability(float(theta), a, b).sum()
+    if not np.isfinite(tcc):
+        return np.nan
     return int(np.clip(np.round(tcc / n * scale_max), 0, scale_max))
- 
+    
  
 # ----------------------------------------------------------------------
 # Pipeline gọn
