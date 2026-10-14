@@ -68,26 +68,35 @@ def marginal_loglik(U, a, b, K=41):
 # ----------------------------------------------------------------------
 # M-step cho một item (Newton / Fisher scoring có backtracking)
 # ----------------------------------------------------------------------
-def _mstep_item(n_k, r_k, theta, a, b, reg, a_bounds, b_bounds, n_newton=8):
-    def Q(a_, b_):
-        P = np.clip(expit(D * a_ * (theta - b_)), 1e-12, 1 - 1e-12)
+def _safe_b(a, c, eps=1e-6):
+    """b = -c/a, tránh chia cho 0 khi a ~ 0 (a có thể âm nếu không chặn)."""
+    a = np.asarray(a, float)
+    a_safe = np.where(np.abs(a) < eps, np.where(a < 0, -eps, eps), a)
+    return -np.asarray(c, float) / a_safe
+ 
+ 
+def _mstep_item(n_k, r_k, theta, a, c, reg, a_bounds, n_newton=10):
+    """
+    M-step cho một item theo tham số (a, c) với c = -a*b, eta = D*(a*theta + c).
+    Q lõm theo (a, c) nên Fisher scoring rất ổn định và KHÔNG cần chặn b.
+    Penalty nhẹ: a ~ N(1, 1/reg), c ~ N(0, 1/reg).
+    """
+    def Q(a_, c_):
+        P = np.clip(expit(D * (a_ * theta + c_)), 1e-12, 1 - 1e-12)
         return (np.sum(r_k * np.log(P) + (n_k - r_k) * np.log1p(-P))
-                - 0.5 * reg * ((a_ - 1.0) ** 2 + b_ ** 2))
+                - 0.5 * reg * ((a_ - 1.0) ** 2 + c_ ** 2))
  
-    q0 = Q(a, b)
+    q0 = Q(a, c)
+    va, vc = D * theta, D * np.ones_like(theta)
     for _ in range(n_newton):
-        P = np.clip(expit(D * a * (theta - b)), 1e-12, 1 - 1e-12)
+        P = np.clip(expit(D * (a * theta + c)), 1e-12, 1 - 1e-12)
         res = r_k - n_k * P
-        va = D * (theta - b)              # dη/da
-        vb = -D * a * np.ones_like(theta)  # dη/db
- 
         g = np.array([np.sum(res * va) - reg * (a - 1.0),
-                      np.sum(res * vb) - reg * b])
+                      np.sum(res * vc) - reg * c])
         w = n_k * P * (1.0 - P)
-        I = np.array([[np.sum(w * va * va), np.sum(w * va * vb)],
-                      [np.sum(w * va * vb), np.sum(w * vb * vb)]])
+        I = np.array([[np.sum(w * va * va), np.sum(w * va * vc)],
+                      [np.sum(w * va * vc), np.sum(w * vc * vc)]])
         I += (reg + 1e-8) * np.eye(2)
- 
         try:
             delta = np.linalg.solve(I, g)
         except np.linalg.LinAlgError:
@@ -96,70 +105,63 @@ def _mstep_item(n_k, r_k, theta, a, b, reg, a_bounds, b_bounds, n_newton=8):
         step, accepted = 1.0, False
         while step > 1e-4:
             a_new = np.clip(a + step * delta[0], *a_bounds)
-            b_new = np.clip(b + step * delta[1], *b_bounds)
-            q_new = Q(a_new, b_new)
+            c_new = c + step * delta[1]
+            q_new = Q(a_new, c_new)
             if q_new >= q0:
                 accepted = True
                 break
             step *= 0.5
         if not accepted:
             break
- 
-        change = max(abs(a_new - a), abs(b_new - b))
-        a, b, q0 = a_new, b_new, q_new
+        change = max(abs(a_new - a), abs(c_new - c))
+        a, c, q0 = a_new, c_new, q_new
         if change < 1e-8:
             break
-    return a, b
- 
+    return a, c
+
  
 # ----------------------------------------------------------------------
 # MMLE - EM
 # ----------------------------------------------------------------------
-def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-4, tol_param=1e-4,
-         reg=1e-2, a_bounds=(0.05, 4.0), b_bounds=(-1e9, 1e9),
+def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-6, tol_param=1e-4,
+         reg=1e-2, a_bounds=(0.05, 4.0), b_bounds=None,
          a_init=None, b_init=None, verbose=True, return_ll=False):
     """
-    Ước lượng tham số 2PL bằng MMLE-EM (Bock & Aitkin, 1981).
- 
-    reg > 0  : penalty nhẹ (MAP): a ~ N(1, 1/reg), b ~ N(0, 1/reg).
-               Đặt reg=0 để có ML thuần (có thể bất ổn với item cực đoan).
-    Trả về   : a, b (và log-lik cuối nếu return_ll=True).
+    MMLE-EM (Bock & Aitkin, 1981) cho 2PL.
+    Ước lượng trong không gian (a, c), c = -a*b, rồi trả về b = -c/a.
+    b_bounds=None (mặc định): b nằm trong (-inf, inf). Nếu truyền (lo, hi) thì chỉ cắt kết quả cuối.
+    reg > 0 : penalty nhẹ (MAP). reg=0: ML thuần.
     """
     Um, M = _prep(U)
     N, J = Um.shape
     theta, logw = _gh_nodes(K)
  
-    if a_init is None:
-        a = np.ones(J)
-    else:
-        a = np.clip(np.asarray(a_init, float), *a_bounds)
+    a = np.ones(J) if a_init is None else np.clip(np.asarray(a_init, float), *a_bounds)
     if b_init is None:
         cnt = np.maximum(M.sum(axis=0), 1)
-        b = cal_diff(Um.sum(axis=0) / cnt)          # khởi tạo từ độ khó cổ điển
-        b = np.clip(b - b.mean(), *b_bounds)
+        b0 = cal_diff(Um.sum(axis=0) / cnt)
+        b0 = b0 - b0.mean()
     else:
-        b = np.clip(np.asarray(b_init, float), *b_bounds)
+        b0 = np.asarray(b_init, float)
+    c = -a * b0
  
     if verbose:
         print(f"Start {name}: N={N}, J={J}, K={K}")
  
     prev_ll = -np.inf
-    ll = prev_ll
     for it in range(1, max_iter + 1):
-        # E-step
+        b = -c / a
         W, denom = _posterior(Um, M, a, b, theta, logw)
         ll = denom.sum()
-        n_kj = W.T @ M          # (K,J) số người kỳ vọng tại nút k
-        r_kj = W.T @ Um         # (K,J) số đúng kỳ vọng tại nút k
+        n_kj = W.T @ M
+        r_kj = W.T @ Um
  
-        # M-step
-        a_old, b_old = a.copy(), b.copy()
+        a_old, c_old = a.copy(), c.copy()
         for j in range(J):
-            a[j], b[j] = _mstep_item(n_kj[:, j], r_kj[:, j], theta, a[j], b[j],
-                                     reg, a_bounds, b_bounds)
+            a[j], c[j] = _mstep_item(n_kj[:, j], r_kj[:, j], theta, a[j], c[j], reg, a_bounds)
  
         d_ll = ll - prev_ll
-        d_par = max(np.max(np.abs(a - a_old)), np.max(np.abs(b - b_old)))
+        d_par = max(np.max(np.abs(a - a_old)), np.max(np.abs(c - c_old)))
         if verbose and (it == 1 or it % 10 == 0):
             print(f"Iter {it}: LL = {ll:.4f}  dLL = {d_ll:.3e}  dParam = {d_par:.3e}")
         if abs(d_ll) < tol and d_par < tol_param:
@@ -168,8 +170,12 @@ def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-4, tol_param=1e-4,
             break
         prev_ll = ll
  
+    b = -c / a
+    if b_bounds is not None:
+        b = np.clip(b, *b_bounds)
     ll = marginal_loglik(U, a, b, K)
     return (a, b, ll) if return_ll else (a, b)
+ 
  
  
 # ----------------------------------------------------------------------
@@ -195,7 +201,7 @@ def _mle(Um, M, a, b):
             P = np.clip(expit(D * aa * (t - bb)), 1e-12, 1 - 1e-12)
             return -np.sum(u * np.log(P) + (1 - u) * np.log1p(-P))
  
-        res = minimize_scalar(nll, bounds=(-10, 10), method="bounded")
+        res = minimize_scalar(nll, bounds=(-6, 6), method="bounded")
         t = float(res.x)
         P = expit(D * aa * (t - bb))
         info = np.sum((D * aa) ** 2 * P * (1 - P))
@@ -323,32 +329,32 @@ def chi_square(df, item_param, theta_col="Theta", num_bins=10):
 def true_score(theta, raw, data: pd.Series, item_params: pd.DataFrame, scale_max=300):
     if not np.isfinite(theta) or not np.isfinite(raw):
         return np.nan
-    items = [c for c in data.index if c in item_params.index
-             and np.isfinite(data[c]) and data[c] != MISSING]
+    items = [c for c in data.index if c in item_params.index]      # toàn bộ câu của đề
     n = len(items)
     if n == 0 or raw <= 0:
         return 0
-    if raw >= n:
+    answered = [c for c in items if np.isfinite(data[c]) and data[c] != MISSING]
+    if raw >= len(answered) == n:                                  # chỉ đủ 300 khi làm đủ và đúng hết
         return int(scale_max)
 
     a = item_params.loc[items, "a"].to_numpy(float)
     b = item_params.loc[items, "b"].to_numpy(float)
     tcc = irt_probability(float(theta), a, b).sum()
-    if not np.isfinite(tcc):
-        return np.nan
     return int(np.clip(np.round(tcc / n * scale_max), 0, scale_max))
     
  
 # ----------------------------------------------------------------------
 # Pipeline gọn
 # ----------------------------------------------------------------------
-def fit_2pl(df_items: pd.DataFrame, K=41, reg=1e-2, verbose=True, theta_method="EAP"):
+def fit_2pl(df_items: pd.DataFrame, K=41, reg=1e-2, verbose=True, theta_method="EAP",
+            a_init=None, b_init=None):
     """
     df_items: DataFrame (N x J) chỉ chứa các cột câu hỏi 0/1/-1.
     Trả về (item_params, person_params).
     """
     U = df_items.to_numpy(float)
-    a, b, ll = mmle(U, K=K, reg=reg, verbose=verbose, return_ll=True)
+    a, b, ll = mmle(U, K=K, reg=reg, verbose=verbose, return_ll=True,
+                    a_init=a_init, b_init=b_init)
     se = item_se_observed(U, a, b, K=K)
     items = pd.DataFrame({"a": a, "b": b, "se_a": se["se_a"].to_numpy(), "se_b": se["se_b"].to_numpy()},
                          index=df_items.columns)
