@@ -316,21 +316,47 @@ def oxy_item(item_params, title):
     plt.legend(title='Dạng câu hỏi')
     plt.grid(True, alpha=0.3)
 
-def plot_one(ax, theta, right, title_txt, color:str, lim_low, lim_high):
-        ax.scatter(theta, right, color=color, alpha=0.3)
-        gam = GAM(s(0, n_splines=20)).fit(theta, right)
-        # theta_grid = np.linspace(theta.min(), theta.max(), 300).reshape(-1, 1)
-        pred_grid = np.linspace(lim_low, lim_high, 1000).reshape(-1, 1)
-        raw_pred = gam.predict(pred_grid)         
-        # vẽ đường cong fit
-        # ax.plot(smoothed[:,0], smoothed[:,1], linewidth=2, color='black')
-        ax.plot(pred_grid, raw_pred, linewidth=2, color=color)
+# def plot_one(ax, theta, right, title_txt, color:str, lim_low, lim_high):
+#         ax.scatter(theta, right, color=color, alpha=0.3)
+#         gam = GAM(s(0, n_splines=20)).fit(theta, right)
+#         # theta_grid = np.linspace(theta.min(), theta.max(), 300).reshape(-1, 1)
+#         pred_grid = np.linspace(lim_low, lim_high, 1000).reshape(-1, 1)
+#         raw_pred = gam.predict(pred_grid)         
+#         # vẽ đường cong fit
+#         # ax.plot(smoothed[:,0], smoothed[:,1], linewidth=2, color='black')
+#         ax.plot(pred_grid, raw_pred, linewidth=2, color=color)
 
-        ax.set_title(title_txt)
-        ax.set_xlabel("Theta")
-        ax.set_ylabel("Điểm thô")
-        ax.set_xlim(lim_low,lim_high)
-        ax.set_ylim(0, 32)
+#         ax.set_title(title_txt)
+#         ax.set_xlabel("Theta")
+#         ax.set_ylabel("Điểm thô")
+#         ax.set_xlim(lim_low,lim_high)
+#         ax.set_ylim(0, 32)
+
+def plot_one(ax, theta, right, title_txt, color: str, lim_low, lim_high, ymax=32, n_splines=20):
+    theta = np.asarray(theta, dtype=float)
+    right = np.asarray(right, dtype=float)
+    ok = np.isfinite(theta) & np.isfinite(right)       # bỏ thí sinh không ước lượng theta
+    theta, right = theta[ok], right[ok]
+
+    ax.set_title(title_txt)
+    ax.set_xlabel("Theta")
+    ax.set_ylabel("Điểm thô")
+    ax.set_xlim(lim_low, lim_high)
+    ax.set_ylim(0, ymax)
+    if len(theta) == 0:
+        return
+    ax.scatter(theta, right, color=color, alpha=0.3)
+
+    n_spl = min(n_splines, max(len(np.unique(theta)) - 1, 4))
+    if len(theta) < 30 or len(np.unique(theta)) < 5:   # quá ít dữ liệu để fit đường cong
+        return
+    gam = GAM(s(0, n_splines=n_spl)).fit(theta.reshape(-1, 1), right)
+
+    # chỉ vẽ trong khoảng có dữ liệu, tránh ngoại suy ở hai đầu
+    lo, hi = max(lim_low, theta.min()), min(lim_high, theta.max())
+    grid = np.linspace(lo, hi, 1000).reshape(-1, 1)
+    pred = np.clip(gam.predict(grid), 0, ymax)
+    ax.plot(grid, pred, linewidth=2, color=color)
 
 def draw_box_plot(
     data_1, data_2, data_3, data_4,

@@ -34,6 +34,7 @@ def irt_probability(theta, a, b):
  
 def _prep(U):
     """Tách dữ liệu thành Um (thiếu -> 0) và M (1 nếu có dữ liệu)."""
+    U = np.where(U == MISSING, 0.0, U)        # bỏ trống = sai, vẫn tính vào likelihood
     U = np.asarray(U, dtype=float)
     mask = np.isfinite(U) & (U != MISSING)
     Um = np.where(mask, U, 0.0)
@@ -229,7 +230,9 @@ def theta_estimate(responses, item_params=None, a=None, b=None, method="MLE",
     return_se=True -> trả về (theta, se). Dữ liệu thiếu (-1) được bỏ qua đúng cách.
     Lưu ý: MLE không xác định với người đúng/sai hết, hãy lọc trước (như run_irt_series).
     """
-    Um, M = _prep(np.atleast_2d(np.asarray(responses, dtype=float)))
+    #Um, M = _prep(np.atleast_2d(np.asarray(responses, dtype=float)))
+    R = np.atleast_2d(np.asarray(responses, dtype=float))
+    Um, M = _prep(np.where(R == MISSING, 0.0, R))
     a, b = _split_params(item_params, a, b)
     if method.upper() == "EAP":
         th, se = _eap(Um, M, a, b, prior_mean, prior_std)
@@ -297,6 +300,7 @@ def chi_square(df, item_param, theta_col="Theta", num_bins=10):
             continue
         u = df[item].to_numpy(float)
         valid = np.isfinite(u) & (u != MISSING)
+        valid &= np.isfinite(theta_all)
         t, x = theta_all[valid], u[valid]
         a = float(item_param.loc[item, "a"])
         b = float(item_param.loc[item, "b"])
@@ -327,16 +331,23 @@ def chi_square(df, item_param, theta_col="Theta", num_bins=10):
 # Điểm thực quy đổi theo đường đặc trưng đề thi (TCC)
 # ----------------------------------------------------------------------
 def true_score(theta, raw, data: pd.Series, item_params: pd.DataFrame, scale_max=300):
-    if not np.isfinite(theta) or not np.isfinite(raw):
-        return np.nan
+    # if not np.isfinite(theta) or not np.isfinite(raw):
+    #     return np.nan
     items = [c for c in data.index if c in item_params.index]      # toàn bộ câu của đề
     n = len(items)
-    if n == 0 or raw <= 0:
-        return 0
-    answered = [c for c in items if np.isfinite(data[c]) and data[c] != MISSING]
-    if raw >= len(answered) == n:                                  # chỉ đủ 300 khi làm đủ và đúng hết
-        return int(scale_max)
-
+    # if n == 0 or raw <= 0:
+    #     return 0
+    # answered = [c for c in items if np.isfinite(data[c]) and data[c] != MISSING]
+    # if raw == n and len(answered) == n:
+    #     return int(scale_max)
+    if n == 0 or not np.isfinite(raw):
+            return np.nan
+    if raw <= 0:
+            return 0                       # sai hết hoặc bỏ trống hết
+    if raw >= n:
+            return int(scale_max)          # đúng hết toàn bộ câu tính điểm
+    if not np.isfinite(theta):
+            return np.nan
     a = item_params.loc[items, "a"].to_numpy(float)
     b = item_params.loc[items, "b"].to_numpy(float)
     tcc = irt_probability(float(theta), a, b).sum()
@@ -353,6 +364,7 @@ def fit_2pl(df_items: pd.DataFrame, K=41, reg=1e-2, verbose=True, theta_method="
     Trả về (item_params, person_params).
     """
     U = df_items.to_numpy(float)
+    U = np.where(U == MISSING, 0.0, U)   # bỏ trống = sai
     a, b, ll = mmle(U, K=K, reg=reg, verbose=verbose, return_ll=True,
                     a_init=a_init, b_init=b_init)
     se = item_se_observed(U, a, b, K=K)
@@ -374,6 +386,7 @@ def neg_log_likelihood(theta, responses, item_params):
     """-log L(theta | responses) cho 1 người; bỏ qua câu thiếu (-1). Trả về float."""
     a, b = _split_params(item_params)
     u = np.asarray(responses, dtype=float).ravel()
+    u = np.where(u == MISSING, 0.0, u)
     v = np.isfinite(u) & (u != MISSING)
     t = float(np.asarray(theta).ravel()[0])
     P = np.clip(expit(D * a[v] * (t - b[v])), 1e-12, 1 - 1e-12)
@@ -397,6 +410,7 @@ def posterior(theta_grid, responses, item_params, prior_mean=0, prior_std=1, eps
     grid = np.asarray(theta_grid, float)
     a, b = _split_params(item_params)
     u = np.asarray(responses, dtype=float).ravel()
+    u = np.where(u == MISSING, 0.0, u)
     v = np.isfinite(u) & (u != MISSING)
     P = np.clip(irt_probability(grid, a[v], b[v]), eps, 1 - eps)
     logpost = (norm.logpdf(grid, prior_mean, prior_std)
