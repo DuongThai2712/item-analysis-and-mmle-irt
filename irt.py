@@ -22,6 +22,15 @@ def cal_diff(p) -> float:
     p = np.clip(np.asarray(p, dtype=float), 1e-6, 1 - 1e-6)
     return np.log((1 - p) / p)#np.clip(np.log((1 - p) / p), -6, 6)
 
+def cal_iif(a, b, theta, use_D=True):
+    # use_D=True: thông tin đúng với mô hình dùng D = 1.702  ->  I = (D*a)^2 * P * Q
+    # use_D=False: công thức cũ a^2 * P * Q
+    p = irt_probability(theta, a, b).ravel()
+    k = (D * a) ** 2 if use_D else a ** 2
+    iif = k * p * (1 - p)
+    return iif
+
+
 # Hàm xác suất đúng theo mô hình IRT 2PL
 
 def irt_probability(theta, a, b):
@@ -355,10 +364,95 @@ def true_score(theta, raw, data: pd.Series, item_params: pd.DataFrame, scale_max
     
  
 # ----------------------------------------------------------------------
+# Person-fit (Lz, Infit MSQ, Outfit MSQ) và Item-fit (Infit MSQ, Outfit MSQ)
+# ----------------------------------------------------------------------
+def _fit_inputs(responses, item_params, theta, a, b, missing_as_wrong, theta_method):
+    """Chuẩn bị U, M (mặt nạ), a, b, theta cho các hàm fit. Mặc định câu bỏ trống (-1) = sai."""
+    U = np.asarray(responses, dtype=float)
+    if U.ndim == 1:
+        U = U[None, :]
+    a, b = _split_params(item_params, a, b)
+    miss = ~np.isfinite(U) | (U == MISSING)
+    if missing_as_wrong:
+        M = np.ones_like(U)
+    else:
+        M = (~miss).astype(float)
+    U = np.where(miss, 0.0, U)
+    if theta is None:
+        th, _ = theta_estimate(np.where(M > 0, U, MISSING), a=a, b=b,
+                               method=theta_method, return_se=True)
+    else:
+        th = np.asarray(theta, dtype=float).ravel()
+    return U, M, a, b, th
+
+
+def person_fit(responses, item_params=None, theta=None, a=None, b=None, theta_method="MLE",
+               missing_as_wrong=True, eps=1e-6, lz_cut=1.96, msq_range=(0.7, 1.3)):
+    """
+    Person-fit cho từng thí sinh: Lz, Infit MSQ, Outfit MSQ.
+      Lz     = (l - E[l]) / sqrt(Var[l])      (Drasgow, Levine & Williams, 1985)
+      Outfit = mean( (u-P)^2 / (P*Q) )
+      Infit  = sum( (u-P)^2 ) / sum( P*Q )
+    Cờ: Flag_Lz (Lz < lz_cut), Flag_MSQ (Infit hoặc Outfit ngoài msq_range), Flag (một trong hai).
+    responses: ma trận N x J (0/1/-1) hoặc DataFrame; theta=None -> tự ước lượng bằng theta_method.
+    Lưu ý: Lz kém tin cậy khi đề ngắn (< ~20 câu) vì sai số của theta ước lượng.
+    """
+    index = responses.index if isinstance(responses, pd.DataFrame) else None
+    U, M, a, b, th = _fit_inputs(responses, item_params, theta, a, b, missing_as_wrong, theta_method)
+
+    P = np.clip(irt_probability(th, a, b), eps, 1 - eps)      # (N, J)
+    Q = 1.0 - P
+    W = P * Q
+    l = np.sum(M * (U * np.log(P) + (1 - U) * np.log(Q)), axis=1)
+    El = np.sum(M * (P * np.log(P) + Q * np.log(Q)), axis=1)
+    Vl = np.sum(M * (P * Q * np.log(P / Q) ** 2), axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lz = np.where(Vl > 0, (l - El) / np.sqrt(Vl), np.nan)
+        res2 = M * (U - P) ** 2
+        outfit = np.sum(res2 / W, axis=1) / M.sum(axis=1)
+        infit = np.sum(res2, axis=1) / np.sum(M * W, axis=1)
+
+    lo, hi = msq_range
+    out = pd.DataFrame({"Lz": lz, "Infit_MSQ": infit, "Outfit_MSQ": outfit}, index=index)
+    out["Flag_Lz"] = abs(out["Lz"]) < lz_cut
+    out["Flag_MSQ"] = (out["Infit_MSQ"] < lo) | (out["Infit_MSQ"] > hi) | \
+                      (out["Outfit_MSQ"] < lo) | (out["Outfit_MSQ"] > hi)
+    out["Flag"] = out["Flag_Lz"] | out["Flag_MSQ"]
+    return out
+
+
+def item_fit(responses, item_params=None, theta=None, a=None, b=None, theta_method="MLE",
+             missing_as_wrong=True, eps=1e-6, msq_range=(0.7, 1.3), poor_range=(0.5, 1.5)):
+    """
+    Item-fit cho từng câu: Infit MSQ, Outfit MSQ (kỳ vọng = 1).
+      Outfit_j = mean_i( (X-P)^2 / (P*Q) )          Infit_j = sum_i (X-P)^2 / sum_i P*Q
+    Nhãn Fit_Label: Poor (max > poor_range[1]) > Overfit (min < poor_range[0])
+                    > Good (cả hai trong msq_range) > Fair (còn lại).
+    """
+    index = responses.columns if isinstance(responses, pd.DataFrame) else None
+    U, M, a, b, th = _fit_inputs(responses, item_params, theta, a, b, missing_as_wrong, theta_method)
+
+    P = np.clip(irt_probability(th, a, b), eps, 1 - eps)
+    W = P * (1.0 - P)
+    res2 = M * (U - P) ** 2
+    with np.errstate(divide="ignore", invalid="ignore"):
+        outfit = np.sum(res2 / W, axis=0) / M.sum(axis=0)
+        infit = np.sum(res2, axis=0) / np.sum(M * W, axis=0)
+
+    lo, hi = msq_range
+    plo, phi = poor_range
+    mx, mn = np.fmax(infit, outfit), np.fmin(infit, outfit)
+    label = np.where(mx > phi, "Poor",
+             np.where(mn < plo, "Overfit",
+              np.where((infit >= lo) & (infit <= hi) & (outfit >= lo) & (outfit <= hi), "Good", "Fair")))
+    return pd.DataFrame({"Infit_MSQ": infit, "Outfit_MSQ": outfit, "Fit_Label": label}, index=index)
+
+
+# ----------------------------------------------------------------------
 # Pipeline gọn
 # ----------------------------------------------------------------------
 def fit_2pl(df_items: pd.DataFrame, K=41, reg=1e-2, verbose=True, theta_method="EAP",
-            a_init=None, b_init=None):
+            a_init=None, b_init=None, fit_stats=True, msq_range=(0.7, 1.3), lz_cut=-2.0):
     """
     df_items: DataFrame (N x J) chỉ chứa các cột câu hỏi 0/1/-1.
     Trả về (item_params, person_params).
@@ -372,6 +466,27 @@ def fit_2pl(df_items: pd.DataFrame, K=41, reg=1e-2, verbose=True, theta_method="
                          index=df_items.columns)
     th, psd = theta_estimate(U, a=a, b=b, method=theta_method, return_se=True)
     persons = pd.DataFrame({"Theta": th, "SE": psd}, index=df_items.index)
+
+    if fit_stats:
+        # person-fit: Lz, Infit_MSQ, Outfit_MSQ, Flag_Lz, Flag_MSQ, Flag
+        pf = person_fit(U, a=a, b=b, theta=th, missing_as_wrong=False, lz_cut=lz_cut, msq_range=msq_range)
+        for c in pf.columns:
+            persons[c] = pf[c].to_numpy()
+        # item-fit: Infit_MSQ, Outfit_MSQ, Fit_Label
+        itf = item_fit(U, a=a, b=b, theta=th, missing_as_wrong=False, msq_range=msq_range)
+        for c in itf.columns:
+            items[c] = itf[c].to_numpy()
+        # chi-square (Yen's Q1): Chi2, Chi2_df, p_value
+        dfU = pd.DataFrame(U, columns=df_items.columns)
+        dfU["Theta"] = th
+        chi = chi_square(dfU, items[["a", "b"]])
+        items["Chi2"] = chi["Chi2"].reindex(items.index).to_numpy()
+        items["Chi2_df"] = chi["df"].reindex(items.index).to_numpy()
+        items["p_value"] = chi["p_value"].reindex(items.index).to_numpy()
+        if verbose:
+            print(f"Person-fit: {int(persons['Flag'].sum())}/{len(persons)} thí sinh bị gắn cờ "
+                  f"(Lz<-2: {int(persons['Flag_Lz'].sum())}, MSQ ngoài 0.7-1.3: {int(persons['Flag_MSQ'].sum())})")
+            print("Item-fit:", items["Fit_Label"].value_counts().to_dict())
     if verbose:
         print(f"Marginal LL = {ll:.2f}, AIC = {-2 * ll + 2 * 2 * len(a):.2f}")
     return items, persons
