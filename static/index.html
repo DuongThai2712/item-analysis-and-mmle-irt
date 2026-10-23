@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chấm thi thử</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1d2330;--mut:#6b7385;--bd:#dfe3ea;--pri:#1f5fbf;--ok:#1f8a4c;--bad:#c2372f;--hl:#fff3c4;--obs:#000}
+@media(prefers-color-scheme:dark){:root{--bg:#14171d;--card:#1c2028;--tx:#e8ebf1;--mut:#9aa3b5;--bd:#2d3340;--pri:#6aa3ff;--ok:#4cc486;--bad:#ff7d75;--hl:#4a4220;--obs:#fff}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,"Segoe UI",sans-serif;background:var(--bg);color:var(--tx);display:flex;min-height:100vh}
+nav{width:150px;background:var(--card);border-right:1px solid var(--bd);padding:12px 8px;position:sticky;top:0;height:100vh}
+nav b{display:block;padding:4px 10px 12px;font-size:15px}nav a{display:block;padding:8px 10px;border-radius:6px;cursor:pointer;color:var(--tx)}
+nav a.on{background:var(--pri);color:#fff}main{flex:1;padding:16px;min-width:0}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:10px;background:var(--card);border:1px solid var(--bd);border-radius:8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:12px}
+h2{margin:0 0 10px;font-size:16px}h3{margin:12px 0 6px;font-size:14px}
+button,select,input,textarea{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:5px 9px}
+button{cursor:pointer}button.p{background:var(--pri);color:#fff;border-color:var(--pri)}button.d{color:var(--bad)}
+textarea{width:100%;font-family:ui-monospace,monospace;font-size:12px}label{color:var(--mut);font-size:12px;display:block;margin-bottom:2px}
+.g{display:grid;gap:10px}.g2{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}.g3{grid-template-columns:repeat(auto-fill,minmax(400px,1fr))}
+.tw{overflow:auto;max-height:520px;border:1px solid var(--bd);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{padding:4px 8px;border-bottom:1px solid var(--bd);text-align:right;white-space:nowrap}
+th{position:sticky;top:0;background:var(--card);text-align:center}td:first-child,th:first-child{text-align:left}
+tr.off td{color:var(--mut);text-decoration:line-through}tr.off td.k{text-decoration:none}
+tr.abn td{background:rgba(224,138,0,.13)}td.abn2{background:rgba(194,55,47,.3)!important;font-weight:700}td.key,th.key{font-weight:700;background:var(--hl)}td.ok{color:var(--ok)}td.bad{color:var(--bad)}.mut{color:var(--mut)}
+.ck{display:inline-flex;gap:4px;align-items:center;padding:2px 8px;margin:2px;border:1px solid var(--bd);border-radius:6px;color:var(--tx);font-size:12.5px;cursor:pointer;user-select:none}.ck.off{color:var(--mut);text-decoration:line-through;cursor:default}.tag{padding:1px 7px;border-radius:9px;background:var(--bd);font-size:11.5px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+svg text{fill:var(--tx);font-size:11px}svg .ax{stroke:var(--mut)}svg .gr{stroke:var(--bd)}
+#toast{position:fixed;right:14px;bottom:14px;background:var(--tx);color:var(--bg);padding:8px 14px;border-radius:8px;display:none;max-width:420px;z-index:9}
+.sp{display:inline-block;width:14px;height:14px;border:2px solid var(--bd);border-top-color:var(--pri);border-radius:50%;animation:r 1s linear infinite;vertical-align:middle}@keyframes r{to{transform:rotate(360deg)}}
+</style></head><body>
+<nav><b>Chấm thi thử</b><div id="tabs"></div></nav>
+<main>
+ <div class="bar"><span>Đợt thi</span><select id="dsSel"></select><span>Lần chạy IRT</span><select id="runSel"></select><span id="busy"></span></div>
+ <div id="view"></div>
+</main><div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s), SEC=[["TV","Tiếng Việt","#1f5fbf"],["TA","Tiếng Anh","#d62728"],["TO","Toán","#e08a00"],["KH","Tư duy khoa học","#2ca02c"]];
+const S={ds:null,run:null,tab:"data",dsl:[],runs:[]};
+const f2=(v,d=3)=>v==null?"":(typeof v=="number"?v.toFixed(d):v);
+function toast(m,t=3500){const e=$("#toast");e.textContent=m;e.style.display="block";clearTimeout(e.t);e.t=setTimeout(()=>e.style.display="none",t)}
+async function api(u,o){$("#busy").innerHTML='<span class="sp"></span>';try{const r=await fetch(u,o);const j=await r.json();if(j.error)throw new Error(j.error);return j}catch(e){toast("Lỗi: "+e.message,7000);throw e}finally{$("#busy").innerHTML=""}}
+const post=(u,b)=>api(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+function tbl(rows,cols,o={}){ // cols: [key,label,fmt?]
+ return `<div class="tw"><table><tr>${cols.map(c=>`<th class="${o.keyCol&&o.keyCol(c[0])?'key':''}">${c[1]}</th>`).join("")}</tr>${rows.map(r=>`<tr class="${o.rowCls?o.rowCls(r):''}">${cols.map(c=>{const v=c[2]?c[2](r[c[0]],r):f2(r[c[0]]);const k=o.cellCls?o.cellCls(r,c[0]):"";return `<td class="${k}">${v??""}</td>`}).join("")}</tr>`).join("")}</table></div>`}
+const need=(k)=>S[k]?true:(($("#view").innerHTML=`<div class="card mut">Hãy chọn ${k=="ds"?"một đợt thi ở tab <b>Dữ liệu</b>":"một lần chạy ở tab <b>IRT</b>"}.</div>`),false);
+
+/* ---------- biểu đồ SVG ---------- */
+function chart(o){const W=o.w||430,H=o.h||300,m={l:44,r:12,t:o.title?26:12,b:o.legend===false?36:36},pw=W-m.l-m.r,ph=H-m.t-m.b;
+ const [x0,x1]=o.xl,[y0,y1]=o.yl,X=v=>m.l+(v-x0)/(x1-x0)*pw,Y=v=>m.t+ph-(v-y0)/(y1-y0)*ph;let s="";
+ const tk=(a,b,n)=>{const st=(b-a)/n;return Array.from({length:n+1},(_,i)=>a+i*st)};
+ tk(x0,x1,o.nx||6).forEach(v=>s+=`<line class="gr" x1="${X(v)}" x2="${X(v)}" y1="${m.t}" y2="${m.t+ph}"/><text x="${X(v)}" y="${H-m.b+14}" text-anchor="middle">${+v.toFixed(2)}</text>`);
+ tk(y0,y1,o.ny||5).forEach(v=>s+=`<line class="gr" y1="${Y(v)}" y2="${Y(v)}" x1="${m.l}" x2="${m.l+pw}"/><text x="${m.l-5}" y="${Y(v)+4}" text-anchor="end">${+v.toFixed(2)}</text>`);
+ s+=`<rect x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="none" class="ax"/>`;
+ (o.bars||[]).forEach(b=>{const bw=Math.max(1,(X(b.x+b.w)-X(b.x))-1);s+=`<rect x="${X(b.x)}" y="${Y(b.y)}" width="${bw}" height="${Math.max(0,Y(y0)-Y(b.y))}" fill="${b.c||'#1f5fbf'}" opacity=".8"/>`;if(o.cnt&&b.y>0)s+=`<text x="${X(b.x)+bw/2}" y="${Y(b.y)-2}" text-anchor="middle" style="font-size:9px">${b.y}</text>`});
+ (o.series||[]).forEach(se=>{const pts=se.x.map((x,i)=>[X(x),Y(se.y[i])]).filter(p=>isFinite(p[0])&&isFinite(p[1]));
+  if(se.pts)s+=pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="3.5" style="fill:${se.c}"/>`).join("");
+  if(se.line!==false)s+=`<polyline fill="none" style="stroke:${se.c}" stroke-width="${se.pts?1:2}" ${se.dash?'stroke-dasharray="6 4"':''} points="${pts.map(p=>p.join(",")).join(" ")}"/>`});
+ if(o.title)s+=`<text x="${W/2}" y="16" text-anchor="middle" style="font-size:13px;font-weight:600">${o.title}</text>`;
+ s+=`<text x="${m.l+pw/2}" y="${H-3}" text-anchor="middle">${o.xlab||""}</text><text transform="translate(11 ${m.t+ph/2}) rotate(-90)" text-anchor="middle">${o.ylab||""}</text>`;
+ let lg="",ly=m.t+12;(o.series||[]).filter(se=>se.label).forEach(se=>{lg+=`<line x1="${m.l+8}" x2="${m.l+28}" y1="${ly-4}" y2="${ly-4}" style="stroke:${se.c}" stroke-width="2" ${se.dash?'stroke-dasharray="6 4"':''}/><text x="${m.l+32}" y="${ly}">${se.label}</text>`;ly+=14});
+ (o.notes||[]).forEach(t=>{lg+=`<text x="${m.l+8}" y="${ly}" class="mut">${t}</text>`;ly+=13});
+ return `<svg viewBox="0 0 ${W} ${H}" width="100%">${s}${lg}</svg>`}
+function hist(vals,lo,hi,n,c){const w=(hi-lo)/n,cnt=Array(n).fill(0);vals.filter(isFinite).forEach(v=>{let i=Math.floor((v-lo)/w);if(i>=0&&i<=n)cnt[Math.min(i,n-1)]++});return{bars:cnt.map((y,i)=>({x:lo+i*w,w,y,c})),max:Math.max(...cnt,1)}}
+function histChart(vals,lo,hi,n,c,title,xlab){const h=hist(vals,lo,hi,n,c);return chart({title,xl:[lo,hi],yl:[0,Math.ceil(h.max*1.12)],bars:h.bars,cnt:1,xlab,ylab:"Số lượng"})}
+
+/* ---------- điều hướng ---------- */
+const TABS=[["data","Dữ liệu"],["score","Chấm điểm"],["ctt","CTT"],["irt","IRT"],["true","Điểm thực"],["noise","Nhiễu"],["icc","Đường cong"],["link","Neo đề"]];
+$("#tabs").innerHTML=TABS.map(t=>`<a data-t="${t[0]}">${t[1]}</a>`).join("");
+$("#tabs").onclick=e=>{if(e.target.dataset.t){S.tab=e.target.dataset.t;go()}};
+function go(){document.querySelectorAll("#tabs a").forEach(a=>a.classList.toggle("on",a.dataset.t==S.tab));V[S.tab]()}
+async function loadDs(){S.dsl=await api("/api/datasets");if(!S.dsl.find(d=>d.id==S.ds))S.ds=S.dsl[0]?.id||null;$("#dsSel").innerHTML=S.dsl.map(d=>`<option value="${d.id}" ${d.id==S.ds?"selected":""}>#${d.id} ${d.name} (${d.n} TS)</option>`).join("");await loadRuns()}
+async function loadRuns(){S.runs=S.ds?await api("/api/runs/"+S.ds):[];if(!S.runs.find(r=>r.id==S.run))S.run=S.runs[0]?.id||null;
+ $("#runSel").innerHTML=`<option value="">— chưa có —</option>`+S.runs.map(r=>`<option value="${r.id}" ${r.id==S.run?"selected":""}>#${r.id} ${r.name}</option>`).join("")}
+$("#dsSel").onchange=async e=>{S.ds=+e.target.value;S.run=null;await loadRuns();go()};
+$("#runSel").onchange=e=>{S.run=+e.target.value||null;go()};
+const runData=async()=>S.run?await api("/api/run/"+S.run):null;
+
+const V={};
+/* ---------- Dữ liệu ---------- */
+V.data=()=>{$("#view").innerHTML=`<div class="card"><h2>Tải dữ liệu và chấm</h2><div class="g g2">
+ <div><label>Tên đợt</label><input id="dn" placeholder="Đợt 1 - 2027" style="width:100%"></div>
+ <div><label>File bài làm (.csv)</label><input type="file" id="fd" accept=".csv"></div>
+ <div><label>File mapping (.csv, dấu ;)</label><input type="file" id="fm" accept=".csv"></div>
+ <div><label>File SBD→MaDe (tuỳ chọn)</label><input type="file" id="fx" accept=".csv"></div></div>
+ <p class="row"><button class="p" id="go">Chấm điểm</button><span class="mut">Chạy cham_diem.py: đổi bài làm về đề gốc, chấm 1/0/−1.</span></p><pre id="lg" class="mut"></pre></div>
+ <div class="card"><h2>Các đợt đã lưu</h2>${tbl(S.dsl,[["id","#"],["name","Tên",v=>v],["ts","Thời gian",v=>v],["n","Số TS",v=>v],["id","",(v)=>`<button data-u="${v}">Chọn</button> <button class="d" data-x="${v}">Xoá</button>`]])}</div>`;
+ $("#go").onclick=async()=>{const fd=new FormData();fd.append("name",$("#dn").value);fd.append("data",$("#fd").files[0]);fd.append("mapping",$("#fm").files[0]);if($("#fx").files[0])fd.append("made",$("#fx").files[0]);
+  if(!$("#fd").files[0]||!$("#fm").files[0])return toast("Chọn file bài làm và mapping");const j=await api("/api/dataset",{method:"POST",body:fd});$("#lg").textContent=j.log;S.ds=j.id;await loadDs();toast("Đã chấm xong")};
+ $("#view").onclick=async e=>{if(e.target.dataset.u){S.ds=+e.target.dataset.u;await loadDs();V.data()}if(e.target.dataset.x&&confirm("Xoá đợt này và các lần chạy IRT?")){await api("/api/dataset/"+e.target.dataset.x,{method:"DELETE"});S.ds=null;await loadDs();V.data()}}};
+
+/* ---------- Chấm điểm ---------- */
+V.score=async()=>{if(!need("ds"))return;const j=await api("/api/score/"+S.ds);const cols=j.columns.filter(c=>!/^Cau/.test(c)).concat(["Cau1","Cau2","Cau3","...","Cau120"]);
+ const show=j.columns.filter(c=>!/^Cau/.test(c));const q=j.sections.flatMap(s=>Array.from({length:s.hi-s.lo+1},(_,i)=>"Cau"+(s.lo+i)));
+ $("#view").innerHTML=`<div class="card"><h2>Kết quả chấm (1 đúng, 0 sai, −1 bỏ trống) — ${j.rows.length} thí sinh</h2><div class="row">
+  <a href="/api/score/${S.ds}/csv/score"><button>Tải kết quả chấm</button></a><a href="/api/score/${S.ds}/csv/ans"><button>Tải bài làm đề gốc</button></a><a href="/api/score/${S.ds}/csv/stat"><button>Tải thống kê tỉ lệ đúng</button></a></div><h3>Bảng điểm câu (hiển thị 300 dòng đầu)</h3>
+  ${tbl(j.rows.slice(0,300),show.concat(q).map(c=>[c,c,v=>v??""]))}</div>`};
+
+/* ---------- CTT ---------- */
+V.ctt=async()=>{if(!need("ds"))return;const j=await api("/api/ctt/"+S.ds);let h=`<div class="card"><h2>Điểm thô</h2>`;
+ const st=Object.keys(j.stats.TV).filter(k=>k!="count"||1);h+=tbl(st.map(k=>({k,...Object.fromEntries(Object.keys(j.stats).map(s=>[s,j.stats[s][k]]))})),[["k","Chỉ số",v=>v],...Object.keys(j.stats).map(s=>[s,s=="TOTAL"?"Tổng":SEC.find(x=>x[0]==s)[1]])]);
+ h+=`<div class="g g3">${SEC.map(s=>histChart(j.raw[s[0]],0,30,30,s[2],s[1],"Số câu đúng")).join("")}${histChart(j.raw.TOTAL,0,120,24,"#298c8c","Tổng điểm thô","Số câu đúng")}</div></div>`;
+ const cnt=(k,order)=>order.map(o=>({o,...Object.fromEntries(SEC.map(s=>[s[0],j.items.filter(i=>i.section==s[0]&&i[k]==o).length]))}));
+ const OK=["Rất dễ","Dễ","Tương đối dễ","Bình thường","Tương đối khó","Khó","Rất khó"],OP=["Kém","Chưa tốt","Chấp nhận được","Tương đối tốt","Tốt","Rất tốt","Quá tốt"];
+ const sc=SEC.map(s=>[s[0],s[1],v=>v]);
+ h+=`<div class="card"><h2>Số câu theo độ khó và độ phân biệt</h2><div class="g g2"><div>${tbl(cnt("Độ khó",OK),[["o","Độ khó",v=>v],...sc])}</div><div>${tbl(cnt("Độ phân biệt",OP),[["o","Độ phân biệt (D-Index)",v=>v],...sc])}</div></div></div>`;
+ h+=`<div class="card"><h2>Từng câu</h2>${tbl(j.items,[["item","Câu",v=>v],["section","Phần",v=>v],["CTT","Độ khó (p)"],["Độ khó","Phân loại",v=>v],["D-Index","D-Index"],["Độ phân biệt","Phân loại",v=>v]])}</div>`;$("#view").innerHTML=h};
+
+/* ---------- IRT ---------- */
+S.th={amin:0.2,amax:2,bmax:4};
+const pn=s=>[...new Set(String(s||"").split(/[,\s;]+/).flatMap(t=>/^\d+-\d+$/.test(t)?(([a,b])=>Array.from({length:b-a+1},(_,i)=>a+i))(t.split("-").map(Number)):/^\d+$/.test(t)?[+t]:[]))];
+const abn=x=>x.Used&&x.a!=null&&(x.a<S.th.amin||x.a>S.th.amax||Math.abs(x.b)>S.th.bmax);
+V.irt=async()=>{if(!need("ds"))return;const r=await runData();S.r=r;
+ if(!S.ex||(r&&S.exFor!==r.id)){S.exFor=r?.id;S.ex=Object.fromEntries(SEC.map(s=>[s[0],new Set(pn(r?.config.exclude?.[s[0]]))]))}
+ let h=`<div class="card"><h2>Chạy IRT 2PL</h2><div id="chips"></div><div class="g g2" style="margin-top:8px">
+ <div><label>Ước lượng θ</label><select id="mt"><option>MLE</option><option>EAP</option></select></div>
+ <div><label>Khởi đầu từ lần chạy cũ</label><select id="ir"><option value="">Không</option>${S.runs.map(x=>`<option value="${x.id}">#${x.id} ${x.name}</option>`).join("")}</select></div>
+ <div><label>Tên lần chạy</label><input id="rn" style="width:100%" placeholder="vd: bỏ Cau1, Cau108"></div></div>
+ <p class="row"><button class="p" id="run">Chạy</button><button id="clr">Bỏ chọn hết</button><span class="mut">Bấm “Loại” ở từng câu trong bảng bên dưới rồi bấm Chạy. Mỗi lần chạy được lưu log.</span></p></div>
+ <div class="card"><h2>Nhật ký</h2>${tbl(S.runs,[["id","#"],["name","Tên",v=>v],["ts","Thời gian",v=>v],["config","Loại câu",c=>Object.entries(c.exclude||{}).map(([k,v])=>k+": "+v).join("; ")||"—"],["config","θ",c=>c.method],["id","",v=>`<button data-u="${v}">Xem</button> <a href="/api/export/run/${v}"><button>Xuất Excel</button></a> <a href="/api/export/params/${v}"><button>Tham số (neo)</button></a> <button class="d" data-x="${v}">Xoá</button>`]])}</div>`;
+ if(r)h+=`<div class="card"><h2>Tham số câu — #${r.id} ${r.name}</h2>
+  <div class="row mut">Câu bất thường (tô màu) nếu a &lt; <input id="t0" value="${S.th.amin}" style="width:55px"> hoặc a &gt; <input id="t1" value="${S.th.amax}" style="width:55px"> hoặc |b| &gt; <input id="t2" value="${S.th.bmax}" style="width:55px"> · <span class="tag" style="background:rgba(194,55,47,.3)">a/b bất thường</span> <span class="tag">gạch = đã chọn loại</span></div>
+  <p class="mut">Cần xem xét = p&lt;0.05 và (se_b&gt;10 hoặc se_a&gt;3). Cột “a/b cũ” là tham số gần nhất ở lần chạy trước của câu bị loại. Bấm số câu để xem lịch sử.</p><div id="itm"></div><div id="hist"></div></div>`;
+ $("#view").innerHTML=h;$("#mt").value=r?.config.method||"MLE";
+ const num=x=>+x.Item.slice(3);
+ const draw=()=>{$("#chips").innerHTML=SEC.map(s=>`<div class="row" style="margin:3px 0"><b style="width:120px">${s[1]}</b>${[...S.ex[s[0]]].sort((a,b)=>a-b).map(q=>`<span class="tag">Câu ${q} <a href="#" data-r="${s[0]}:${q}">×</a></span>`).join("")||'<span class="mut">chưa loại câu nào</span>'}</div>`).join("");
+  if(r)$("#itm").innerHTML=tbl(r.items,[["Item","",(v,x)=>`<button data-l="${x.Test}:${num(x)}">${S.ex[x.Test].has(num(x))?"Giữ":"Loại"}</button>`],["Item","Câu",(v,x)=>`<a href="#" data-h="${v}">${v}</a>`],["Test","Phần",v=>v],["Used","Dùng",v=>v?"✓":"✗"],["a","a"],["b","b"],["se_a","se_a"],["se_b","se_b"],["Infit_MSQ","Infit"],["Outfit_MSQ","Outfit"],["Fit_Label","Fit",v=>v],["Chi2","χ²",v=>f2(v,2)],["p_value","p"],["review","Cần xem xét",v=>v?"⚠":""],["prev_a","a cũ"],["prev_b","b cũ"],["prev_run","Lần",v=>v?"#"+v:""]],
+   {rowCls:x=>S.ex[x.Test].has(num(x))?"off":abn(x)?"abn":"",cellCls:(x,k)=>(k=="a"&&abn(x)&&(x.a<S.th.amin||x.a>S.th.amax))||(k=="b"&&abn(x)&&Math.abs(x.b)>S.th.bmax)?"abn2":k=="p_value"&&x.p_value<.05?"bad":""})};
+ draw();["t0","t1","t2"].forEach((id,i)=>{const e=$("#"+id);if(e)e.onchange=()=>{S.th={amin:+$("#t0").value,amax:+$("#t1").value,bmax:+$("#t2").value};draw()}});
+ $("#clr").onclick=()=>{SEC.forEach(s=>S.ex[s[0]].clear());draw()};
+ $("#run").onclick=async()=>{const ex={};SEC.forEach(s=>{if(S.ex[s[0]].size)ex[s[0]]=[...S.ex[s[0]]].sort((a,b)=>a-b).join(",")});toast("Đang chạy IRT, có thể mất vài chục giây…",60000);
+  const j=await post("/api/irt",{ds:S.ds,exclude:ex,method:$("#mt").value,init_run:$("#ir").value||null,name:$("#rn").value});S.run=j.id;await loadRuns();toast("Xong");V.irt()};
+ $("#view").onclick=async e=>{const t=e.target;
+  if(t.dataset.l){const[c,q]=t.dataset.l.split(":");const st=S.ex[c];st.has(+q)?st.delete(+q):st.add(+q);draw()}
+  if(t.dataset.r){e.preventDefault();const[c,q]=t.dataset.r.split(":");S.ex[c].delete(+q);draw()}
+  if(t.dataset.u){S.run=+t.dataset.u;await loadRuns();V.irt()}
+  if(t.dataset.x&&confirm("Xoá lần chạy này?")){await api("/api/run/"+t.dataset.x,{method:"DELETE"});S.run=null;await loadRuns();V.irt()}
+  if(t.dataset.h){e.preventDefault();const j=await api(`/api/item_history/${S.ds}/${t.dataset.h}`);$("#hist").innerHTML=`<h3>Lịch sử ${t.dataset.h}</h3>`+tbl(j,[["run","Lần",v=>"#"+v],["name","Tên",v=>v],["Used","Dùng",v=>v?"✓":"✗"],["a","a"],["b","b"],["se_a","se_a"],["se_b","se_b"],["p_value","p"],["Fit_Label","Fit",v=>v]])}}};
+
+/* ---------- Điểm thực ---------- */
+V.true=async()=>{if(!need("run"))return;const bw=S.bw||50,bs=S.bs||10;const r=await runData(),P=r.persons;const T=P.map(p=>p.Total_True),nz=a=>a.filter(v=>v!=null&&v!==0);
+ const st=a=>{const v=nz(a).sort((x,y)=>x-y),n=v.length,m=v.reduce((s,x)=>s+x,0)/n,sd=Math.sqrt(v.reduce((s,x)=>s+(x-m)**2,0)/(n-1)),q=p=>v[Math.round((n-1)*p)];return{cnt:n,m,sd,min:v[0],q1:q(.25),med:q(.5),q3:q(.75),max:v[n-1]}};
+ const rows=SEC.map(s=>({nm:s[1],...st(P.map(p=>p[s[0]+"_True"]))})).concat([{nm:"Tổng",...st(T)}]);
+ $("#view").innerHTML=`<div class="card"><h2>Điểm thực — #${r.id} ${r.name}</h2><p class="mut">Thống kê bỏ thí sinh 0 điểm (như notebook). Điểm tổng là tổng 4 phần (tối đa 1200).</p>
+ ${tbl(rows,[["nm","Phần",v=>v],["cnt","Số TS",v=>v],["m","TB",v=>f2(v,2)],["sd","Độ lệch chuẩn",v=>f2(v,2)],["min","Min",v=>v],["q1","25%",v=>v],["med","Trung vị",v=>v],["q3","75%",v=>v],["max","Max",v=>v]])}
+ <div class="row"><label style="margin:0">Độ rộng nhóm — thành phần</label><input id="bs" type="number" min="1" value="${bs}" style="width:70px"><label style="margin:0">tổng</label><input id="bw" type="number" min="5" value="${bw}" style="width:70px"></div><div class="g g3">${SEC.map(s=>histChart(P.map(p=>p[s[0]+"_True"]),0,Math.ceil(300/bs)*bs,Math.ceil(300/bs),s[2],"Phổ điểm thực — "+s[1],"Điểm thực (1–300)")).join("")}${histChart(T,0,Math.ceil(1200/bw)*bw,Math.ceil(1200/bw),"#298c8c","Phổ điểm tổng","Điểm thực (1–1200)")}</div>
+ <h3>Bảng điểm</h3><div class="row" id="bwx"><a href="/api/export/run/${r.id}"><button>Xuất Excel</button></a></div>${tbl(P,[["SBD","SBD",v=>v],...SEC.flatMap(s=>[[s[0]+"_Raw","Thô "+s[0],v=>v],[s[0]+"_Theta","θ "+s[0]],[s[0]+"_True","Thực "+s[0],v=>v]]),["Total_True","Tổng",v=>v]])}</div>`;$("#bw").onchange=e=>{S.bw=Math.max(5,+e.target.value||50);V.true()};$("#bs").onchange=e=>{S.bs=Math.max(1,+e.target.value||10);V.true()}};
+
+/* ---------- Nhiễu ---------- */
+V.noise=async()=>{if(!need("ds"))return;const j=await api("/api/ctt/"+S.ds);let sec=S.nsec||"TV";
+ const draw=()=>{const rows=j.nhieu.filter(x=>x.section==sec);const O=["A","B","C","D","Null"];
+  const cols=[["item","Câu",v=>v],["key","Đáp án",v=>`<b>${v}</b>`],...O.map(o=>[`p_${o}`,`% ${o=="Null"?"Trống":o}`,v=>f2(v*100,1)]),...O.map(o=>[`pbcc_${o}`,`r ${o=="Null"?"Trống":o}`,v=>f2(v)])];
+  $("#nz").innerHTML=tbl(rows,cols,{keyCol:k=>false,cellCls:(r,k)=>{const o=k.split("_")[1];return r.key.includes(o)&&/^p/.test(k)&&o!="Null"&&k!="pbcc_Null"?"key":(k.startsWith("pbcc")&&r.key.includes(o)?"key":(k.startsWith("pbcc")&&r[k]>0.1&&!r.key.includes(o)?"bad":""))}})};
+ $("#view").innerHTML=`<div class="card"><h2>Độ nhiễu đáp án</h2><p class="mut">Ô nền vàng, in đậm = đáp án đúng. <b>% chọn</b> và <b>r</b> (tương quan điểm-nhị phân với điểm thô phần thi). Đáp án sai có r dương (&gt;0.1) bị tô đỏ: đáp án nhiễu hút thí sinh khá, nên rà lại. Đáp án đúng mà r thấp/âm cũng cần kiểm tra.</p>
+ <div class="row">${SEC.map(s=>`<button data-s="${s[0]}" class="${s[0]==sec?"p":""}">${s[1]}</button>`).join("")}</div><div id="nz" style="margin-top:8px"></div></div>`;draw();
+ $("#view").onclick=e=>{if(e.target.dataset.s){S.nsec=sec=e.target.dataset.s;V.noise()}}};
+
+/* ---------- Đường cong ---------- */
+V.icc=async()=>{if(!need("run"))return;const r=await runData(),sec=S.csec||"TV",num=x=>+x.Item.slice(3);
+ if(!S.sel||S.selRun!==r.id){S.selRun=r.id;S.sel=Object.fromEntries(SEC.map(s=>[s[0],new Set(r.items.filter(x=>x.Test==s[0]&&x.Used).map(num))]))}
+ $("#view").innerHTML=`<div class="card"><h2>ICC · IIF · TCC · TIF</h2><div class="row"><select id="cs">${SEC.map(s=>`<option value="${s[0]}" ${s[0]==sec?"selected":""}>${s[1]}</option>`).join("")}</select>
+ <button id="ca">Chọn hết</button><button id="cn">Bỏ hết</button><button id="ci2">Đảo</button><span class="mut">Số nhóm quan sát</span><input id="cb" type="number" value="${S.cbin||10}" min="3" max="30" style="width:70px" title="Số nhóm quan sát">
+ <button class="p" id="cg">Vẽ</button></div><div id="ck" style="margin-top:8px"></div><p class="mut">Tick các câu cần xem (câu gạch ngang đã bị loại ở lần chạy này). ICC: expected (mô hình) và observed (các nhóm θ). IIF: thông tin từng câu. TCC/TIF: tổng của nhóm câu đã chọn (TCC có thêm điểm quan sát). Câu đã loại không được vẽ.</p></div><div id="cv"></div>`;
+ const its=r.items.filter(x=>x.Test==sec),st=S.sel[sec];
+ const drawCk=()=>{$("#ck").innerHTML=its.map(x=>{const q=num(x);return `<label class="ck ${x.Used?"":"off"}"><input type="checkbox" data-q="${q}" ${st.has(q)?"checked":""} ${x.Used?"":"disabled"}> ${q}</label>`}).join("")};drawCk();
+ $("#ck").onchange=e=>{const q=+e.target.dataset.q;e.target.checked?st.add(q):st.delete(q)};
+ $("#ca").onclick=()=>{its.filter(x=>x.Used).forEach(x=>st.add(num(x)));drawCk()};$("#cn").onclick=()=>{st.clear();drawCk()};
+ $("#ci2").onclick=()=>{its.filter(x=>x.Used).forEach(x=>st.has(num(x))?st.delete(num(x)):st.add(num(x)));drawCk()};
+ $("#cs").onchange=e=>{S.csec=e.target.value;V.icc()};
+ $("#cg").onclick=async()=>{S.csec=$("#cs").value;S.cbin=+$("#cb").value;if(!st.size)return toast("Hãy tick ít nhất một câu");$("#cv").innerHTML='<div class="card mut">Đang vẽ…</div>';
+  try{const j=await post("/api/curves",{run:S.run,section:S.csec,items:[...st].sort((a,b)=>a-b).join(","),bins:S.cbin});const col=SEC.find(s=>s[0]==S.csec)[2];let h="";
+  if(j.excluded.length)h+=`<div class="card mut">Câu đã loại, không vẽ: ${j.excluded.join(", ")}</div>`;
+  if(!j.items.length)h+=`<div class="card mut">Không có câu hợp lệ trong phần này. Số câu phải thuộc đúng phần đã chọn.</div>`;
+  if(j.tcc)h+=`<div class="g g3"><div class="card">${chart({title:`TCC — ${j.tcc.n} câu`,xl:[-6,6],yl:[0,j.tcc.n],xlab:"Theta",ylab:"Điểm thô",nx:12,series:[{x:j.theta,y:j.tcc.exp,c:col,label:"Kỳ vọng"},{x:j.tcc.obs_x,y:j.tcc.obs_y,c:"var(--obs)",pts:1,label:"Quan sát"}]})}</div>
+   <div class="card">${chart({title:`TIF — ${j.tif.n} câu`,xl:[-6,6],yl:[0,Math.max(...j.tif.y)*1.1],xlab:"Theta",ylab:"Thông tin",nx:12,series:[{x:j.theta,y:j.tif.y,c:col,label:"Thông tin"},{x:j.theta,y:j.tif.se.map(v=>Math.min(v,Math.max(...j.tif.y)*1.1)),c:"#d62728",dash:1,label:"SE(θ)"}]})}</div></div>`;
+  h+=`<div class="g g3">`+j.items.slice(0,40).map(i=>`<div class="card">${chart({title:`ICC Câu ${i.item} — a=${f2(i.a,2)}, b=${f2(i.b,2)}`,xl:[-6,6],yl:[0,1],xlab:"Theta",ylab:"P",nx:6,h:260,
+   series:[{x:j.theta,y:i.exp,c:col,label:"Expected"},{x:i.obs_x,y:i.obs_y,c:"var(--obs)",pts:1,label:"Observed"}],notes:[`Infit ${f2(i.infit,2)} · Outfit ${f2(i.outfit,2)}`]})}</div><div class="card">${chart({title:`IIF Câu ${i.item}`,xl:[-6,6],yl:[0,Math.max(...i.iif,0.01)*1.1],xlab:"Theta",ylab:"Thông tin",nx:6,h:260,series:[{x:j.theta,y:i.iif,c:col}]})}</div>`).join("")+`</div>`;
+  if(j.items.length>40)h+=`<div class="card mut">Chỉ hiển thị 40 câu đầu, hãy thu hẹp danh sách câu.</div>`;$("#cv").innerHTML=h}catch(e){$("#cv").innerHTML=`<div class="card bad">Không vẽ được: ${e.message}</div>`}};
+};
+
+/* ---------- Neo đề ---------- */
+V.link=async()=>{const L=await api("/api/links");
+ $("#view").innerHTML=`<div class="card"><h2>Neo đề thi (Stocking-Lord)</h2><div class="g g2">
+ <div><label>Hướng neo</label><select id="ld"><option value="XY">Đề X → Y (quy X về thang Y)</option><option value="YX">Đề Y → X (quy Y về thang X)</option></select></div>
+ <div><label>File Excel (X, Y, Anchor, TV_X…)</label><input type="file" id="lf" accept=".xlsx"></div>
+ <div><label>D của đề X / đề Y</label><div class="row"><input id="dx" value="1.702" style="width:80px"><input id="dy" value="1" style="width:80px"></div></div>
+ <div><label>Trọng số θ · Bootstrap</label><div class="row"><select id="lw"><option>normal</option><option>empirical</option></select><input id="lb" value="0" style="width:70px" title="số lần bootstrap (chỉ dùng khi chạy đầy đủ)"></div></div>
+ <div><label>Tên</label><input id="ln" style="width:100%"></div><div><label><input type="checkbox" id="l1"> Một phía (chỉ nhóm nguồn)</label><label>Thanh lọc neo (ICC RMSD &gt;, trống = tắt)</label><input id="lp" style="width:90px"></div></div>
+ <h3>Hoặc nhập tay (ghi đè file) — mỗi dòng một câu</h3><div class="g g2"><div><label>Tham số X: id,a,b</label><textarea id="tx" rows="5" placeholder="1,0.52,-0.8"></textarea></div><div><label>Tham số Y: id,a,b</label><textarea id="ty" rows="5" placeholder="1,0.42,-0.5"></textarea></div><div><label>Câu neo: X,Y</label><textarea id="ta" rows="5" placeholder="3,4"></textarea></div></div>
+ <p class="row"><button class="p" id="lg">Neo đề</button><a href="/api/template"><button>Tải file Excel mẫu</button></a><span class="mut">Có đủ sheet TV_X…KH_X + hướng X→Y + không nhập tay ⇒ chạy đầy đủ (điểm thực mới từng thí sinh). Ngược lại chỉ neo tham số câu hỏi.</span></p></div>
+ <div class="card"><h2>Nhật ký neo đề</h2>${tbl(L,[["id","#"],["name","Tên",v=>v],["ts","Thời gian",v=>v],["id","",v=>`<button data-v="${v}">Xem</button> <a href="/api/link/${v}/xlsx"><button>Tải Excel</button></a>`]])}</div><div id="lr"></div>`;
+ const show=j=>{let h=`<div class="card"><h2>Kết quả neo ${j.direction=="XY"?"X→Y":"Y→X"} (${j.mode=="full"?"đầy đủ":"chỉ tham số"}) <a href="/api/link/${j.id}/xlsx"><button>Tải Excel</button></a></h2>`;
+  h+=tbl(j.results.map(r=>({...r.summary})),[["Test","Phần",v=>v],["N_anchor","Neo",v=>v],["N_used","Dùng",v=>v],["A","A",v=>f2(v,4)],["B","B",v=>f2(v,4)],["SLcrit","SLcrit",v=>f2(v,5)],["TCC_RMSD(anchor)","TCC RMSD"]])+`</div>`;
+  h+=`<div class="g g3">${j.results.map(r=>`<div class="card">${chart({title:r.label,xl:[-6,6],yl:[0,r.n],nx:12,xlab:"Theta",ylab:"Điểm thô kỳ vọng",series:[{x:r.theta,y:r.tcc_before,c:"#1f77b4",dash:1,label:"Nguồn trước link"},{x:r.theta,y:r.tcc_after,c:"#d62728",label:"Nguồn sau link"},{x:r.theta,y:r.tcc_target,c:"#2ca02c",label:"Đích"}],notes:[`A=${f2(r.A,4)}  B=${f2(r.B,4)}`]})}</div>`).join("")}</div>`;
+  h+=j.results.map(r=>`<div class="card"><h3>${r.label}: câu neo</h3>${tbl(r.anchors,Object.keys(r.anchors[0]).map(k=>[k,k,k=="Lý do loại"||k=="test"?v=>v:(k=="Dùng"?v=>v?"✓":"✗":undefined)]),{rowCls:x=>x["Dùng"]?"":"off"})}<h3>Tham số mới (thang đích)</h3>${tbl(r.items,Object.keys(r.items[0]).map(k=>[k,k,k=="test"||k=="Status"||k=="Item"?v=>v:undefined]))}${r.persons?`<h3>Điểm thực mới của thí sinh</h3>${tbl(r.persons.slice(0,300),Object.keys(r.persons[0]).map(k=>[k,k,k=="Exclude"?v=>v:undefined]))}`:""}</div>`).join("");$("#lr").innerHTML=h};
+ $("#lg").onclick=async()=>{const fd=new FormData(),f=$("#lf").files[0];if(f)fd.append("file",f);
+  fd.append("opts",JSON.stringify({direction:$("#ld").value,d_x:+$("#dx").value,d_y:+$("#dy").value,weights:$("#lw").value,boot:+$("#lb").value||0,one_sided:$("#l1").checked,purify:$("#lp").value||null,name:$("#ln").value,x_text:$("#tx").value,y_text:$("#ty").value,a_text:$("#ta").value}));
+  toast("Đang neo…",30000);show(await api("/api/link",{method:"POST",body:fd}));toast("Xong")};
+ $("#view").addEventListener("click",async e=>{if(e.target.dataset.v)show(await api("/api/link/"+e.target.dataset.v))})};
+
+loadDs().then(go);
+</script></body></html>

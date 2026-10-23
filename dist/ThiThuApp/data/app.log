@@ -1,0 +1,76 @@
+127.0.0.1 - - [23/Oct/2026 13:43:14] "GET /api/datasets HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:43:15] "GET /api/datasets HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:43:17] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:43:17] "GET /api/datasets HTTP/1.1" 200 -
+Traceback (most recent call last):
+  File "flask\app.py", line 917, in full_dispatch_request
+  File "flask\app.py", line 891, in dispatch_request
+  File "flask\app.py", line 500, in raise_routing_exception
+  File "flask\ctx.py", line 362, in match_request
+  File "werkzeug\routing\map.py", line 629, in match
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+127.0.0.1 - - [23/Oct/2026 13:43:17] "GET /favicon.ico HTTP/1.1" 400 -
+127.0.0.1 - - [23/Oct/2026 13:43:18] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:43:18] "GET /api/datasets HTTP/1.1" 200 -
+Traceback (most recent call last):
+  File "flask\app.py", line 917, in full_dispatch_request
+  File "flask\app.py", line 891, in dispatch_request
+  File "flask\app.py", line 500, in raise_routing_exception
+  File "flask\ctx.py", line 362, in match_request
+  File "werkzeug\routing\map.py", line 629, in match
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+127.0.0.1 - - [23/Oct/2026 13:43:18] "GET /favicon.ico HTTP/1.1" 400 -
+127.0.0.1 - - [23/Oct/2026 13:43:26] "GET /api/datasets HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:43:27] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:43:27] "GET /api/datasets HTTP/1.1" 200 -
+Traceback (most recent call last):
+  File "flask\app.py", line 917, in full_dispatch_request
+  File "flask\app.py", line 891, in dispatch_request
+  File "flask\app.py", line 500, in raise_routing_exception
+  File "flask\ctx.py", line 362, in match_request
+  File "werkzeug\routing\map.py", line 629, in match
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+127.0.0.1 - - [23/Oct/2026 13:43:27] "GET /favicon.ico HTTP/1.1" 400 -
+127.0.0.1 - - [23/Oct/2026 13:44:06] "POST /api/dataset HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:44:06] "GET /api/datasets HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:44:06] "GET /api/runs/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:44:17] "GET /api/score/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:44:24] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:44:25] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:44:36] "POST /api/irt HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:44:36] "GET /api/runs/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 13:44:36] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 22:28:45] "GET /api/datasets HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 22:28:49] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 22:28:49] "GET /api/datasets HTTP/1.1" 200 -
+Traceback (most recent call last):
+  File "flask\app.py", line 917, in full_dispatch_request
+  File "flask\app.py", line 891, in dispatch_request
+  File "flask\app.py", line 500, in raise_routing_exception
+  File "flask\ctx.py", line 362, in match_request
+  File "werkzeug\routing\map.py", line 629, in match
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+127.0.0.1 - - [23/Oct/2026 22:28:50] "GET /favicon.ico HTTP/1.1" 400 -
+127.0.0.1 - - [23/Oct/2026 22:28:50] "GET /api/runs/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 22:28:54] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 22:28:54] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 22:28:57] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Oct/2026 22:29:15] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:07:15] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:07:18] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:09:50] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:13:25] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:13:29] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:14:04] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:18:37] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:18:40] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:18:45] "POST /api/curves HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:19:32] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:19:46] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:19:48] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:19:52] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:21:09] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:21:11] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:21:28] "GET /api/run/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:21:29] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Oct/2026 00:21:31] "GET /api/run/1 HTTP/1.1" 200 -
