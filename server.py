@@ -59,6 +59,51 @@ def err(e):
 
 
 # ------------------------------------------------------------------ chấm điểm (cham_diem.py)
+def grade(d):
+    """Chạy đúng cham_diem.main() trên các file đã lưu của một đợt (dùng cho lần đầu và khi chấm lại)."""
+    cham_diem.DATA_FILE, cham_diem.MAP_FILE = "data.csv", "mapping.csv"
+    cham_diem.MADE_FILE = "made.csv" if (d / "made.csv").exists() else None
+    buf, cwd = io.StringIO(), os.getcwd()
+    try:
+        os.chdir(d)
+        with contextlib.redirect_stdout(buf): cham_diem.main()
+    finally: os.chdir(cwd)
+    return buf.getvalue(), len(pd.read_csv(d / "data" / "ket_qua_cham_diem.csv"))
+
+@app.post("/api/dataset/<int:i>/regrade")
+def regrade(i):
+    log, n = grade(dsdir(i)); c = db(); c.execute("UPDATE datasets SET n=? WHERE id=?", (n, i)); c.commit()
+    return J({"log": log, "n": n})
+
+# ---- bảng đáp án theo hoán vị (sửa đáp án đúng trong mapping)
+@app.get("/api/mapping/<int:ds>")
+def mapping_view(ds):
+    mp = cham_diem.parse_mapping(dsdir(ds) / "mapping.csv"); codes = list(mp); n = max(max(qs) for qs in mp.values())
+    exams = [{"code": c, "map": [[mp[c][q][0], [l for l, _ in mp[c][q][1]]] if mp[c].get(q) else None for q in range(1, n + 1)]} for c in codes]
+    marks, valid, warn = [], [], []
+    for q in range(1, n + 1):
+        cnt, k = Counter(), 0
+        for c in codes:
+            info = mp[c].get(q)
+            if info: k += 1; cnt.update(l for l, ok in info[1] if ok)
+        valid.append(k > 0); marks.append("".join(sorted(l for l, v in cnt.items() if v * 2 > k)))
+        if k and any(0 < v < k for v in cnt.values()): warn.append(f"Câu {q}: các mã đề không thống nhất đáp án đúng trong file mapping (hiển thị theo đa số).")
+    return J({"n": n, "exams": exams, "marks": marks, "valid": valid, "warnings": warn})
+
+@app.post("/api/mapping/<int:ds>/marks")
+def mapping_marks(ds):
+    p = request.get_json(); q = int(p["q"]); marks = set(str(p.get("marks", "")).upper())
+    if not marks <= set("ABCD"): raise ValueError("Đáp án chỉ gồm A, B, C, D")
+    path = dsdir(ds) / "mapping.csv"; bak = path.with_name("mapping.orig.csv")
+    if not bak.exists(): shutil.copy(path, bak)                                 # giữ bản mapping gốc
+    m = pd.read_csv(path, sep=";", dtype=str, encoding="utf-8-sig"); m.columns = [c.strip() for c in m.columns]
+    col = next(c for c in m.columns[1:] if int(re.findall(r"\d+", c)[0]) == q)
+    for i, cell in m[col].items():
+        mt = re.fullmatch(r"(\d+)-([A-D*]+)", cell.strip().upper()) if isinstance(cell, str) else None
+        if mt: m.at[i, col] = f"{mt.group(1)}-" + "".join(l + ("*" if l in marks else "") for l in mt.group(2) if l != "*")
+    m.to_csv(path, sep=";", index=False, encoding="utf-8-sig")
+    return J({"ok": 1})
+
 @app.post("/api/dataset")
 def new_dataset():
     f, m, mm = request.files.get("data"), request.files.get("mapping"), request.files.get("made")
@@ -67,19 +112,12 @@ def new_dataset():
     d = dsdir(cur.lastrowid); d.mkdir(parents=True)
     f.save(d / "data.csv"); m.save(d / "mapping.csv")
     if mm and mm.filename: mm.save(d / "made.csv")
-    cham_diem.DATA_FILE, cham_diem.MAP_FILE = "data.csv", "mapping.csv"
-    cham_diem.MADE_FILE = "made.csv" if (d / "made.csv").exists() else None
-    buf, cwd = io.StringIO(), os.getcwd()
-    try:
-        os.chdir(d)
-        with contextlib.redirect_stdout(buf): cham_diem.main()                 # chạy đúng cham_diem.main()
+    try: log, n = grade(d)
     except BaseException as e:
-        os.chdir(cwd); shutil.rmtree(d, ignore_errors=True); con.execute("DELETE FROM datasets WHERE id=?", (cur.lastrowid,)); con.commit()
+        shutil.rmtree(d, ignore_errors=True); con.execute("DELETE FROM datasets WHERE id=?", (cur.lastrowid,)); con.commit()
         raise ValueError(f"Chấm điểm lỗi: {e}")
-    os.chdir(cwd)
-    n = len(pd.read_csv(d / "data" / "ket_qua_cham_diem.csv"))
     con.execute("UPDATE datasets SET n=? WHERE id=?", (n, cur.lastrowid)); con.commit()
-    return J({"id": cur.lastrowid, "log": buf.getvalue()})
+    return J({"id": cur.lastrowid, "log": log})
 
 @app.get("/api/datasets")
 def datasets(): return J([dict(r) for r in db().execute("SELECT * FROM datasets ORDER BY id DESC")])
