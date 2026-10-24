@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trộn đề</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1d2330;--mut:#6b7385;--bd:#dfe3ea;--pri:#1f5fbf;--ok:#1f8a4c;--bad:#c2372f;--hl:#ffe94d;--hlt:#1d2330;--head:#e7edf8}
+@media(prefers-color-scheme:dark){:root{--bg:#14171d;--card:#1c2028;--tx:#e8ebf1;--mut:#9aa3b5;--bd:#2d3340;--pri:#6aa3ff;--ok:#4cc486;--bad:#ff7d75;--hl:#d9b800;--hlt:#14171d;--head:#262d3b}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,"Segoe UI",sans-serif;background:var(--bg);color:var(--tx);display:flex;min-height:100vh}
+nav{width:150px;background:var(--card);border-right:1px solid var(--bd);padding:12px 8px;position:sticky;top:0;height:100vh;flex:none}
+nav b{display:block;padding:4px 10px 12px;font-size:15px}nav a{display:block;padding:8px 10px;border-radius:6px;cursor:pointer;color:var(--tx)}
+nav a.on{background:var(--pri);color:#fff}main{flex:1;padding:16px;min-width:0}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:10px;background:var(--card);border:1px solid var(--bd);border-radius:8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:12px}
+h2{margin:0 0 10px;font-size:16px}h3{margin:12px 0 6px;font-size:14px}
+button,select,input{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:5px 9px}
+button{cursor:pointer}button.p{background:var(--pri);color:#fff;border-color:var(--pri)}button:disabled{opacity:.5;cursor:default}
+label{color:var(--mut);font-size:12px;display:block;margin-bottom:2px}
+.g{display:grid;gap:10px}.g2{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.mut{color:var(--mut)}.tag{padding:1px 7px;border-radius:9px;background:var(--bd);font-size:11.5px}
+pre{white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,monospace;margin:0;max-height:560px;overflow:auto}
+.warn{padding:6px 8px;border-left:3px solid #e08a00;background:rgba(224,138,0,.12);margin:4px 0;font-size:12.5px;border-radius:0 6px 6px 0}
+/* ---- bảng đáp án theo đề gốc ---- */
+.tw{overflow:auto;max-height:72vh;border:1px solid var(--bd);border-radius:6px;background:var(--card)}
+table.ans{border-collapse:separate;border-spacing:0;font-size:12.5px;width:max-content}
+.ans th,.ans td{border-right:1px solid var(--bd);border-bottom:1px solid var(--bd);text-align:center;padding:0 4px;height:25px;min-width:34px;white-space:nowrap}
+.ans td.stt,.ans th.stt{min-width:46px}
+.ans th{background:var(--head);font-weight:700;position:sticky;z-index:2}
+.ans tr.h1 th{top:0}.ans tr.h2 th{top:26px}
+.ans .bs{border-left:2px solid var(--tx)}
+.ans td.y{background:var(--hl);color:var(--hlt);font-weight:700}
+.ans td.gc{cursor:pointer}.ans td.gc:hover{outline:2px solid var(--pri);outline-offset:-2px}
+.ans td.z{background:rgba(224,138,0,.25)}.ans td.m{background:rgba(194,55,47,.22)}
+.ans .sk{position:sticky;background:var(--card);z-index:1}.ans th.sk{z-index:3;background:var(--head)}
+.ans td.sk.y{background:var(--hl)}
+.c0{left:0}.c1{left:46px}.c2{left:80px}.c3{left:114px}.c4{left:148px}
+.ans tr.sec td{border-bottom:2px solid var(--tx)}
+#toast{position:fixed;right:14px;bottom:14px;background:var(--tx);color:var(--bg);padding:8px 14px;border-radius:8px;display:none;max-width:420px;z-index:9;white-space:pre-wrap}
+.sp{display:inline-block;width:14px;height:14px;border:2px solid var(--bd);border-top-color:var(--pri);border-radius:50%;animation:r 1s linear infinite;vertical-align:middle}@keyframes r{to{transform:rotate(360deg)}}
+.sw{display:inline-block;width:14px;height:14px;vertical-align:middle;border:1px solid var(--bd)}
+</style></head><body>
+<nav><b>Trộn đề</b><div id="tabs"></div></nav>
+<main>
+ <div class="bar"><span id="stat" class="mut">Chưa import project</span><span id="busy"></span></div>
+ <div id="view"></div>
+</main><div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s),L="ABCD";
+const S={tab:"data",d:{loaded:false,n:0,warnings:[],questions:[],exams:[]}};
+function toast(m,t=4000){const e=$("#toast");e.textContent=m;e.style.display="block";clearTimeout(e.t);e.t=setTimeout(()=>e.style.display="none",t)}
+async function api(u,o){$("#busy").innerHTML='<span class="sp"></span>';try{const r=await fetch(u,o);const t=await r.text();let j;try{j=JSON.parse(t)}catch(_){throw new Error(`HTTP ${r.status}: ${t.slice(0,300)}`)}if(j.error)throw new Error(j.error);return j}catch(e){toast("Lỗi: "+e.message,9000);throw e}finally{$("#busy").innerHTML=""}}
+const post=(u,b)=>api(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+const TABS=[["data","Dữ liệu"],["table","Bảng đáp án"],["log","Nhật ký"]];
+$("#tabs").innerHTML=TABS.map(t=>`<a data-t="${t[0]}">${t[1]}</a>`).join("");
+$("#tabs").onclick=e=>{if(e.target.dataset.t){S.tab=e.target.dataset.t;go()}};
+function go(){document.querySelectorAll("#tabs a").forEach(a=>a.classList.toggle("on",a.dataset.t==S.tab));V[S.tab]();
+ const d=S.d;$("#stat").textContent=d.loaded?`${d.n} câu gốc · ${d.exams.length} mã đề · ${d.warnings.length} cảnh báo`:"Chưa import project"}
+async function refresh(){S.d=await api("/api/state")}
+const need=(ex)=>{if(!S.d.loaded){$("#view").innerHTML='<div class="card mut">Hãy import project ở tab <b>Dữ liệu</b>.</div>';return false}
+ if(ex&&!S.d.exams.length){$("#view").innerHTML='<div class="card mut">Hãy tạo mã đề sao ở tab <b>Dữ liệu</b>.</div>';return false}return true};
+const warnsHtml=w=>w.length?w.map(x=>`<div class="warn">${esc(x)}</div>`).join(""):'<span class="mut">Không có cảnh báo.</span>';
+
+const V={};
+/* ---------- Dữ liệu ---------- */
+V.data=()=>{const d=S.d;
+ $("#view").innerHTML=`<div class="card"><h2>1. Import project tex</h2><div class="g g2">
+  <div><label>Chọn thư mục project (chứa 1.tex, main.tex, preamble.tex, macros.tex, content/…)</label><input type="file" id="fdir" webkitdirectory multiple></div>
+  <div><label>Hoặc nhập đường dẫn thư mục trên máy chạy server</label><input id="pth" style="width:100%" placeholder="D:\\de-thi\\project"></div></div>
+  <p class="row"><button class="p" id="imp">Import</button><span class="mut" id="impi">${d.loaded?`Đang dùng: ${esc(d.root)}`:""}</span></p></div>
+  <div class="card"><h2>2. Tạo mã đề sao</h2><div class="row"><label style="margin:0">Số mã đề</label><input id="nn" type="number" min="1" max="50" value="${d.exams.length||4}" style="width:80px">
+  <button class="p" id="gen" ${d.loaded?"":"disabled"}>Tạo mã đề</button><span class="mut">Mã đề = STT + 2 số ngẫu nhiên. Tạo lại sẽ thay toàn bộ mã đề hiện có.</span></div>
+  <p>${d.loaded?d.exams.map(e=>`<span class="tag">${e.code}</span> `).join("")||'<span class="mut">Chưa có mã đề.</span>':""}</p></div>
+  <div class="card"><h2>Cảnh báo từ file gốc</h2>${d.loaded?warnsHtml(d.warnings):'<span class="mut">—</span>'}</div>`;
+ $("#imp").onclick=async()=>{const fs=[...($("#fdir").files||[])].filter(f=>/\.tex$/i.test(f.name)),p=$("#pth").value.trim();
+  if(!fs.length&&!p)return toast("Hãy chọn thư mục hoặc nhập đường dẫn");
+  let j;if(fs.length){const fd=new FormData();fs.forEach(f=>fd.append("files",f,f.webkitRelativePath||f.name));toast(`Đang tải ${fs.length} file .tex…`,20000);j=await api("/api/import",{method:"POST",body:fd})}
+  else j=await post("/api/import",{path:p});
+  S.d=j;toast(`Đã nạp ${j.n} câu gốc`);go()};
+ $("#gen").onclick=async()=>{const n=+$("#nn").value;if(!(n>=1))return toast("Nhập số mã đề");S.d=await post("/api/generate",{n});toast(`Đã tạo ${n} mã đề`);S.tab="table";go()}};
+
+/* ---------- Bảng đáp án ---------- */
+const marksOf=q=>new Set((S.d.questions[q-1].marks||"").split("").filter(Boolean));
+function cellInfo(q){const m=marksOf(q).size;return m==0?"z":m>1?"m":""}
+V.table=()=>{if(!need(true))return;const d=S.d,E=d.exams;
+ const dl=(u,t)=>`<a href="${u}"><button>${t}</button></a>`;
+ let h=`<div class="card"><div class="row">${dl("/api/export/xlsx","Xuất dapan.xlsx")}${dl("/api/export/csv","Xuất mapping (CSV)")}${dl("/api/export/logs","Xuất log + bảng đáp án (zip)")}${dl("/api/export/tex","Xuất đề tex (zip)")}</div>
+  <p class="mut" style="margin:8px 0 0"><span class="sw" style="background:var(--hl)"></span> đáp án đúng · bấm vào ô trong khối <b>Gốc</b> để đánh dấu / bỏ đánh dấu, các mã đề sao đổi theo ·
+  <span class="sw" style="background:rgba(224,138,0,.4)"></span> STT: chưa có đáp án đúng (mọi thí sinh được điểm) · <span class="sw" style="background:rgba(194,55,47,.35)"></span> STT: nhiều đáp án đúng</p></div>`;
+ h+=`<div class="tw"><table class="ans" id="tb"><thead><tr class="h1"><th colspan="5" class="sk c0">Gốc</th>${E.map(e=>`<th colspan="5" class="bs">${e.code}</th>`).join("")}</tr>
+  <tr class="h2">${["STT",...L].map((t,i)=>`<th class="sk c${i} ${i?"":"stt"}">${t}</th>`).join("")}${E.map(()=>["STT",...L].map((t,i)=>`<th class="${i?"":"stt bs"}">${t}</th>`).join("")).join("")}</tr></thead><tbody>`;
+ for(let q=1;q<=d.n;q++){const m=marksOf(q);
+  h+=`<tr data-r="${q}" class="${q%30==0?"sec":""}"><td class="sk c0 stt ${cellInfo(q)}" title="${esc(d.questions[q-1].path)}: ${esc(d.questions[q-1].snippet)}">${q}</td>`+
+   [0,1,2,3].map(i=>`<td class="sk c${i+1} gc ${m.has(L[i])?"y":""}" data-q="${q}" data-l="${L[i]}"></td>`).join("");
+  E.forEach((e,k)=>{const [stt,perm]=e.map[q-1];h+=`<td class="stt bs">${stt}</td>`+[0,1,2,3].map(p=>`<td class="${m.has(perm[p])?"y":""}" data-q="${q}" data-e="${k}" data-p="${p}" title="gốc: ${perm[p]}"></td>`).join("")});
+  h+="</tr>"}
+ $("#view").innerHTML=h+`</tbody></table></div>`;
+ $("#tb").onclick=async e=>{const t=e.target;if(!t.classList.contains("gc"))return;const q=+t.dataset.q,l=t.dataset.l,m=marksOf(q);
+  m.has(l)?m.delete(l):m.add(l);const s=[...m].sort().join("");S.d.questions[q-1].marks=s;paintRow(q);
+  try{await post("/api/marks",{q,marks:s})}catch(_){}}};
+function paintRow(q){const m=marksOf(q),d=S.d,tr=$(`tr[data-r="${q}"]`);
+ tr.querySelectorAll("td.gc").forEach(c=>c.classList.toggle("y",m.has(c.dataset.l)));
+ tr.querySelectorAll("td[data-e]").forEach(c=>{const perm=d.exams[+c.dataset.e].map[q-1][1];c.classList.toggle("y",m.has(perm[+c.dataset.p]))});
+ const s=tr.firstElementChild;s.classList.remove("z","m");const k=cellInfo(q);if(k)s.classList.add(k)}
+
+/* ---------- Nhật ký ---------- */
+V.log=async()=>{if(!need(false))return;const d=S.d;
+ $("#view").innerHTML=`<div class="card"><h2>Cảnh báo từ file gốc</h2>${warnsHtml(d.warnings)}</div>
+  <div class="card"><h2>Nhật ký đảo đề</h2>${d.exams.length?`<div class="row"><select id="ls">${d.exams.map(e=>`<option>${e.code}</option>`).join("")}</select><a href="/api/export/logs"><button>Tải log + bảng đáp án (zip)</button></a></div><pre id="lt" style="margin-top:8px"></pre>`:'<span class="mut">Chưa có mã đề.</span>'}</div>`;
+ if(!d.exams.length)return;const load=async()=>{$("#lt").textContent=(await api("/api/log/"+$("#ls").value)).text};$("#ls").onchange=load;load()};
+
+refresh().then(go);
+</script></body></html>
