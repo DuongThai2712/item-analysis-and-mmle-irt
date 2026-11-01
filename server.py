@@ -164,9 +164,28 @@ def correct_keys(ds):
             if info: out.setdefault(q, Counter()).update("".join(l for l, ok in info[1] if ok))
     return {q: "".join(sorted(c for c, n in cnt.items() if n >= max(cnt.values()) / 2)) if cnt else "" for q, cnt in out.items()}
 
+BASE = ["SBD", "MaDe", "Gioi", "Raw", "Null"]                       # ctt.py gốc loại đúng 5 cột này; bỏ Theta/True... nếu có
+def ctt_G(F): return {c: F[c][BASE + [x for x in F[c].columns if str(x).startswith("Cau")]] for c in CODES}
+
+def kr_category(r):
+    return None if r is None or not np.isfinite(r) else "Rất cao" if r >= .9 else "Cao" if r >= .8 else "Chấp nhận được" if r >= .7 else "Thấp" if r >= .6 else "Kém"
+
+def kr20_table(F):
+    """KR-20 từng phần (thí sinh có làm phần đó, Null<30) và toàn bài (thí sinh làm cả 4 phần)."""
+    G = ctt_G(F); rows = []
+    ok_all = np.logical_and.reduce([(G[c]["Null"] < 30).to_numpy() for c in CODES])
+    parts = [(c, n, G[c][G[c]["Null"] < 30]) for c, n, _, _ in SEC]
+    allc = pd.concat([G[CODES[0]][BASE].reset_index(drop=True)] + [G[c].filter(regex=r"^Cau").reset_index(drop=True) for c in CODES], axis=1)
+    parts.append(("TOTAL", "Toàn bài", allc[ok_all]))
+    for c, n, d in parts:
+        it = d.drop(columns=BASE); raw = (it == 1).sum(axis=1); kr = float(ctt.cal_kr20(d)) if len(d) > 1 else np.nan
+        sd = float(raw.std(ddof=0)) if len(d) else np.nan
+        rows.append({"code": c, "name": n, "k": it.shape[1], "n": len(d), "kr20": kr, "mean": float(raw.mean()) if len(d) else np.nan,
+                     "sd": sd, "sem": sd * np.sqrt(1 - kr) if np.isfinite(kr) else np.nan, "grade": kr_category(kr)})
+    return rows
+
 def ctt_tables(ds, F, ans):
-    base = ["SBD", "MaDe", "Gioi", "Raw", "Null"]                    # ctt.py gốc loại đúng 5 cột này; bỏ Theta/True... nếu có
-    G = {c: F[c][base + [x for x in F[c].columns if str(x).startswith("Cau")]] for c in CODES}
+    G = ctt_G(F)
     diff = pd.concat([ctt.cal_diff(G[c][G[c]["Null"] < 30]) for c in CODES]).rename("CTT").to_frame()
     disc = pd.concat([ctt.cal_disc(G[c][G[c]["Null"] < 30]) for c in CODES]).rename("D-Index").to_frame()
     t = diff.join(disc); t["Độ khó"] = t["CTT"].map(b_category); t["Độ phân biệt"] = t["D-Index"].map(a_category)
@@ -188,7 +207,7 @@ def ctt_api(ds):
             r = {"item": q, "section": c, "key": keys.get(q, ""), **{f"pbcc_{o}": nh.loc[n, o] for o in ["A", "B", "C", "D", "Null"]},
                  **{f"p_{o}": float((s == o).mean()) for o in "ABCD"}, "p_Null": float(s.isna().mean())}
             nhrows.append(r)
-    return J({"raw": raw, "stats": stats, "items": items, "nhieu": nhrows})
+    return J({"raw": raw, "stats": stats, "items": items, "nhieu": nhrows, "kr20": kr20_table(F)})
 
 
 # ------------------------------------------------------------------ IRT (irt.py + irt_series.py) + log
@@ -299,6 +318,7 @@ def export_run(rid):
         items.reset_index().to_excel(w, sheet_name="items", index=False)
         P.to_excel(w, sheet_name="true_score", index=False)
         t.to_excel(w, sheet_name="ctt"); nh.to_excel(w, sheet_name="nhieu")
+        pd.DataFrame(kr20_table(F)).to_excel(w, sheet_name="kr20", index=False)
         pd.DataFrame([json.loads(r["config"])]).astype(str).to_excel(w, sheet_name="config", index=False)
     return send_file(f, as_attachment=True, download_name=f"results_run{rid}.xlsx")
 

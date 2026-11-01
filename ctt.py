@@ -32,3 +32,15 @@ def cal_disc(data: pd.DataFrame):
         L = lower[j].sum()
         a[j] = ((U - L) / group)
     return a
+
+
+# Độ tin cậy KR-20 của một phần thi: k/(k-1) * (1 - tổng(p*q) / phương sai điểm thô)
+def cal_kr20(data: pd.DataFrame) -> float:
+    items = data.drop(columns=['SBD', 'Raw', 'Null', 'MaDe', 'Gioi'])
+    k = items.shape[1]
+    correct = (items == 1)
+    var_total = correct.sum(axis=1).var(ddof=0)
+    if k < 2 or not var_total > 0:
+        return np.nan
+    p = correct.mean()
+    return (k / (k - 1)) * (1 - (p * (1 - p)).sum() / var_total)
