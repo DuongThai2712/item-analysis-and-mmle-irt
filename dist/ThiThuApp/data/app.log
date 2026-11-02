@@ -1,6 +1,6 @@
-127.0.0.1 - - [24/Oct/2026 15:21:41] "GET /api/datasets HTTP/1.1" 200 -
-127.0.0.1 - - [24/Oct/2026 15:21:44] "GET / HTTP/1.1" 200 -
-127.0.0.1 - - [24/Oct/2026 15:21:44] "GET /api/datasets HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:03:35] "GET /api/datasets HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:03:38] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:03:38] "GET /api/datasets HTTP/1.1" 200 -
 Traceback (most recent call last):
   File "flask\app.py", line 917, in full_dispatch_request
   File "flask\app.py", line 891, in dispatch_request
@@ -8,4 +8,18 @@ Traceback (most recent call last):
   File "flask\ctx.py", line 362, in match_request
   File "werkzeug\routing\map.py", line 629, in match
 werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
-127.0.0.1 - - [24/Oct/2026 15:21:44] "GET /favicon.ico HTTP/1.1" 400 -
+127.0.0.1 - - [02/Nov/2026 12:03:38] "GET /favicon.ico HTTP/1.1" 400 -
+127.0.0.1 - - [02/Nov/2026 12:03:59] "POST /api/dataset HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:03:59] "GET /api/datasets HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:00] "GET /api/runs/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:04] "GET /api/mapping/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:18] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:19] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:21] "GET /api/mapping/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:22] "GET /api/score/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:25] "GET /api/export/items/1?run=&amin=0.2&amax=2&bmax=4&nth=5 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:44] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:46] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:50] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:52] "GET /api/ctt/1 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Nov/2026 12:04:58] "GET /api/ctt/1 HTTP/1.1" 200 -

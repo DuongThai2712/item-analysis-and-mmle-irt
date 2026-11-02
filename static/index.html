@@ -139,7 +139,9 @@ function paintAns(q){const ms=mkSet(q),tr=$(`tr[data-r="${q}"]`);
 V.score=async()=>{if(!need("ds"))return;const j=await api("/api/score/"+S.ds);const cols=j.columns.filter(c=>!/^Cau/.test(c)).concat(["Cau1","Cau2","Cau3","...","Cau120"]);
  const show=j.columns.filter(c=>!/^Cau/.test(c));const q=j.sections.flatMap(s=>Array.from({length:s.hi-s.lo+1},(_,i)=>"Cau"+(s.lo+i)));
  $("#view").innerHTML=`<div class="card"><h2>Kết quả chấm (1 đúng, 0 sai, −1 bỏ trống) — ${j.rows.length} thí sinh</h2><div class="row">
-  <a href="/api/score/${S.ds}/csv/score"><button>Tải kết quả chấm</button></a><a href="/api/score/${S.ds}/csv/ans"><button>Tải bài làm đề gốc</button></a><a href="/api/score/${S.ds}/csv/stat"><button>Tải thống kê tỉ lệ đúng</button></a></div><h3>Bảng điểm câu (hiển thị 300 dòng đầu)</h3>
+  <a href="/api/score/${S.ds}/csv/score"><button>Tải kết quả chấm</button></a><a href="/api/score/${S.ds}/csv/ans"><button>Tải bài làm đề gốc</button></a><a href="/api/score/${S.ds}/csv/stat"><button>Tải thống kê tỉ lệ đúng</button></a>
+  <a href="/api/export/items/${S.ds}?${new URLSearchParams({run:S.run||"",amin:S.th.amin,amax:S.th.amax,bmax:S.th.bmax,nth:S.nth??5})}"><button class="p">Xuất thông số câu hỏi (xlsx)</button></a></div>
+  <p class="mut" style="margin:8px 0 0">File thông số gồm CTT, IRT (${S.run?"lần chạy #"+S.run:"chưa có lần chạy IRT nên bỏ qua cột IRT"}) và nhiễu của 120 câu; đáp án đúng tô vàng, giá trị bất thường chữ đỏ theo ngưỡng hiện tại (a/b: ${S.th.amin}–${S.th.amax}, |b| ≤ ${S.th.bmax}; nhiễu &lt; ${S.nth??5}%).</p><h3>Bảng điểm câu (hiển thị 300 dòng đầu)</h3>
   ${tbl(j.rows.slice(0,300),show.concat(q).map(c=>[c,c,v=>v??""]))}</div>`};
 
 /* ---------- CTT ---------- */

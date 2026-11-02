@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from openpyxl import Workbook
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
 os.environ.setdefault("MPLBACKEND", "Agg")                          # không mở cửa sổ matplotlib
@@ -192,12 +193,8 @@ def ctt_tables(ds, F, ans):
     nh = pd.concat([nhieu.do_nhieu(data=ans, chamdiem=F[c], start=lo, end=hi) for c, _, lo, hi in SEC])
     return t, nh
 
-@app.get("/api/ctt/<int:ds>")
-def ctt_api(ds):
-    ch, ans, F = frames(ds)
-    t, nh = ctt_tables(ds, F, ans); keys = correct_keys(ds)
-    raw = {c: F[c]["Raw"].tolist() for c in CODES}; raw["TOTAL"] = sum((F[c]["Raw"] for c in CODES)).tolist()
-    stats = {k: pd.Series(v).describe().round(3).to_dict() for k, v in raw.items()}
+def item_rows(F, ans, t, nh, keys):
+    """Một dòng/câu: CTT (items) và nhiễu (nhrows) — dùng chung cho tab CTT, Nhiễu và file xuất Excel."""
     items, nhrows = [], []
     for c, _, lo, hi in SEC:
         v = ans.merge(F[c][["SBD", "Null"]], on="SBD"); v = v[v["Null"] < 30]
@@ -207,6 +204,15 @@ def ctt_api(ds):
             r = {"item": q, "section": c, "key": keys.get(q, ""), **{f"pbcc_{o}": nh.loc[n, o] for o in ["A", "B", "C", "D", "Null"]},
                  **{f"p_{o}": float((s == o).mean()) for o in "ABCD"}, "p_Null": float(s.isna().mean())}
             nhrows.append(r)
+    return items, nhrows
+
+@app.get("/api/ctt/<int:ds>")
+def ctt_api(ds):
+    ch, ans, F = frames(ds)
+    t, nh = ctt_tables(ds, F, ans); keys = correct_keys(ds)
+    raw = {c: F[c]["Raw"].tolist() for c in CODES}; raw["TOTAL"] = sum((F[c]["Raw"] for c in CODES)).tolist()
+    stats = {k: pd.Series(v).describe().round(3).to_dict() for k, v in raw.items()}
+    items, nhrows = item_rows(F, ans, t, nh, keys)
     return J({"raw": raw, "stats": stats, "items": items, "nhieu": nhrows, "kr20": kr20_table(F)})
 
 
@@ -321,6 +327,65 @@ def export_run(rid):
         pd.DataFrame(kr20_table(F)).to_excel(w, sheet_name="kr20", index=False)
         pd.DataFrame([json.loads(r["config"])]).astype(str).to_excel(w, sheet_name="config", index=False)
     return send_file(f, as_attachment=True, download_name=f"results_run{rid}.xlsx")
+
+
+@app.get("/api/export/items/<int:ds>")
+def export_items(ds):
+    """Xlsx: CTT + IRT (lần chạy chọn) + nhiễu, đánh dấu như trong phần mềm; cố định hàng đầu và cột đầu."""
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    g = request.args.get; rid = int(g("run")) if g("run") else None
+    amin, amax, bmax, nth = (float(g(k, d)) for k, d in (("amin", .2), ("amax", 2), ("bmax", 4), ("nth", 5)))
+    ch, ans, F = frames(ds); t, nh = ctt_tables(ds, F, ans); items, nhrows = item_rows(F, ans, t, nh, correct_keys(ds))
+    irt_items, run_name = {}, None
+    if rid:
+        r = run_row(rid); run_name = f"#{rid} {r['name']}"; irt_items = {x["Item"]: x for x in json.loads(r["items"])}
+    secname = {c: n for c, n, _, _ in SEC}
+    RED, YEL, BAD = Font(color="C2372F"), PatternFill("solid", fgColor="FFEB84"), PatternFill("solid", fgColor="F8D0CC")
+    O = ["A", "B", "C", "D", "Null"]; lab = lambda o: "Trống" if o == "Null" else o
+    cols = [("Câu", "q", None), ("Phần", "sec", None), ("CTT Độ khó (p)", "p", "0.000"), ("CTT Phân loại độ khó", "pc", None),
+            ("CTT D-Index", "d", "0.000"), ("CTT Phân loại phân biệt", "dc", None)]
+    if rid: cols += [("IRT a", "a", "0.000"), ("IRT b", "b", "0.000"), ("IRT se_a", "se_a", "0.000"), ("IRT se_b", "se_b", "0.000"),
+                     ("IRT Infit", "Infit_MSQ", "0.00"), ("IRT Outfit", "Outfit_MSQ", "0.00"), ("IRT Fit", "Fit_Label", None),
+                     ("IRT χ²", "Chi2", "0.00"), ("IRT p-value", "p_value", "0.000"), ("IRT Dùng", "used", None), ("IRT Cần xem xét", "review", None)]
+    cols += [("Nhiễu Đáp án đúng", "key", None)] + [(f"Nhiễu % {lab(o)}", f"p_{o}", "0.0%") for o in O] + [(f"Nhiễu r {lab(o)}", f"r_{o}", "0.000") for o in O]
+    wb = Workbook(); ws = wb.active; ws.title = "Thông số câu hỏi"; ws.append([c[0] for c in cols])
+    num = lambda v: None if v is None or (isinstance(v, float) and not np.isfinite(v)) else v
+    for it, nr in zip(items, nhrows):
+        q = it["item"]; ir = irt_items.get(f"Cau{q}", {}); key = nr["key"]; used = bool(ir.get("Used")) if ir else False
+        row = {"q": q, "sec": secname[it["section"]], "p": it["CTT"], "pc": it["Độ khó"], "d": it["D-Index"], "dc": it["Độ phân biệt"], "key": key}
+        row.update({k: (ir.get(k) if used else None) for k in ("a", "b", "se_a", "se_b", "Infit_MSQ", "Outfit_MSQ", "Fit_Label", "Chi2", "p_value")})
+        row.update({"used": ("✓" if used else "✗") if ir else None, "review": "⚠" if ir.get("review") and used else None})
+        for o in O: row[f"p_{o}"], row[f"r_{o}"] = nr[f"p_{o}"], nr[f"pbcc_{o}"]
+        ws.append([num(row.get(c[1])) for c in cols])
+        R = ws.max_row; ix = {c[1]: i + 1 for i, c in enumerate(cols)}; cell = lambda k: ws.cell(R, ix[k])
+        for o in "ABCD":                                                              # nhiễu: đáp án đúng vàng+đậm; đáp án sai đỏ
+            for k, bad in ((f"p_{o}", nr[f"p_{o}"] * 100 < nth), (f"r_{o}", (nr[f"pbcc_{o}"] or 0) > .1)):
+                if o in key: cell(k).fill, cell(k).font = YEL, Font(bold=True)
+                elif bad: cell(k).font = RED
+        if used:                                                                      # IRT: a/b bất thường, p<0.05
+            if ir["a"] < amin or ir["a"] > amax: cell("a").font, cell("a").fill = Font(color="C2372F", bold=True), BAD
+            if abs(ir["b"]) > bmax: cell("b").font, cell("b").fill = Font(color="C2372F", bold=True), BAD
+            if ir.get("p_value") is not None and ir["p_value"] < .05: cell("p_value").font = RED
+    head = PatternFill("solid", fgColor="E7EDF8")
+    for i, c in enumerate(cols, 1):
+        h = ws.cell(1, i); h.font, h.fill, h.alignment = Font(bold=True), head, Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for r in range(2, ws.max_row + 1):
+            x = ws.cell(r, i)
+            if c[2] and x.value is not None: x.number_format = c[2]
+            if i > 2: x.alignment = Alignment(horizontal="center")
+        ws.column_dimensions[get_column_letter(i)].width = 9 if i == 1 else 17 if i in (2, 4, 6) else 11
+    ws.row_dimensions[1].height = 34; ws.freeze_panes = "B2"                          # cố định hàng đầu + cột đầu
+    n = wb.create_sheet("Ghi chú")
+    for line in [f"Đợt thi #{ds}", f"Lần chạy IRT: {run_name or 'không chọn (bỏ qua các cột IRT)'}", "",
+                 "Ô nền vàng, chữ đậm: đáp án đúng (% chọn và r của đáp án đúng).",
+                 f"Chữ đỏ ở % chọn: đáp án sai có tỉ lệ chọn dưới {nth:g}%.", "Chữ đỏ ở r: đáp án sai có r > 0.1 (hút thí sinh khá).",
+                 f"Nền đỏ nhạt, chữ đỏ đậm ở IRT a/b: a < {amin:g} hoặc a > {amax:g} hoặc |b| > {bmax:g}.", "Chữ đỏ ở IRT p-value: p < 0.05.",
+                 "IRT Cần xem xét (⚠): p < 0.05 và (se_b > 10 hoặc se_a > 3).", "Câu đã loại khỏi lần chạy IRT: để trống các cột IRT (IRT Dùng = ✗).",
+                 "CTT: độ khó = đúng/tổng thí sinh làm phần đó; D-Index theo nhóm cao–thấp 27% (ctt.py)."]: n.append([line])
+    n.column_dimensions["A"].width = 95
+    f = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name; wb.save(f)
+    return send_file(f, as_attachment=True, download_name=f"thong_so_cau_hoi_dot{ds}.xlsx")
 
 @app.get("/api/export/params/<int:rid>")                                         # file tham số dạng sheet X (dùng cho neo đề)
 def export_params(rid):
