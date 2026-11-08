@@ -327,7 +327,7 @@ V.icc=async()=>{if(!need("run"))return;const r=await runData(),sec=S.csec||"TV",
   if(!j.items.length){P.innerHTML=`<div class="cvempty">Không có câu hợp lệ để vẽ.</div>`;return}
   const nm=O.mode.toUpperCase(),iq=j.items.map(i=>i.item),title=O.group?`${nm} - ${iq.length} câu`:`${nm} - Câu ${qlist(iq)}`;
   S.cvName=`${nm}_${sec}_`+(O.group?`nhom_${iq.length}_cau`:"cau_"+(iq.length<=8?iq.join("-"):iq[0]+"-"+iq[iq.length-1]+"_"+iq.length+"cau"));
-  const sub=`${secNm} · Lần chạy #${r.id} ${r.name}`+(O.group?` · Câu ${qlist(iq)}`:"")+(j.excluded.length?` · Bỏ qua câu đã loại: ${j.excluded.join(", ")}`:"");
+  const sub=secNm+(O.group?` · Câu ${qlist(iq)}`:"")+(j.excluded.length?` · Bỏ qua câu đã loại: ${j.excluded.join(", ")}`:"");
   const G=cvPlot(j,{...O,col,title,sub});P.innerHTML=G.svg;const sv=P.querySelector("svg"),hv=sv.querySelector(".hov"),tip=$("#tip"),curs=[...sv.querySelectorAll(".cur")];
   const clear=()=>{hv.style.display="none";tip.style.display="none";curs.forEach(c=>{c.style.opacity="";if(c.dataset.w)c.style.strokeWidth=c.dataset.w})};
   sv.onmouseleave=clear;
