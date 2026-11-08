@@ -314,6 +314,17 @@ def curves():
     return J(out)
 
 
+@app.post("/api/figure")
+def save_figure():
+    """Trả hình (PNG/SVG) do trình duyệt vẽ về dạng tệp tải xuống (chạy được cả trong cửa sổ app lẫn trình duyệt)."""
+    import base64
+    fmt = request.form.get("fmt", "png"); data = request.form.get("data", "")
+    name = re.sub(r"[^\w\-]+", "_", request.form.get("name", "hinh")).strip("_") or "hinh"
+    if fmt == "svg": body, mime = data.encode("utf-8"), "image/svg+xml"
+    else: body, mime, fmt = base64.b64decode(data.split(",", 1)[-1]), "image/png", "png"
+    return send_file(io.BytesIO(body), mimetype=mime, as_attachment=True, download_name=f"{name}.{fmt}")
+
+
 # ------------------------------------------------------------------ Điểm thực + xuất file
 @app.get("/api/export/run/<int:rid>")
 def export_run(rid):
