@@ -47,6 +47,7 @@ circle.pt{cursor:pointer}circle.pt:hover{stroke:var(--tx)!important;stroke-width
 .cvw{display:grid;grid-template-columns:minmax(300px,390px) minmax(0,1fr);gap:12px;align-items:start}
 @media(max-width:980px){.cvw{grid-template-columns:minmax(0,1fr)}}
 .cvl .cvt{max-height:calc(100vh - 250px)}.cvt td.k{white-space:nowrap}.cvt tr{cursor:pointer}.cvt tr.off{cursor:default}.cvt tr.sel td{background:rgba(31,95,191,.08)}
+.cvt th.srt{cursor:pointer;user-select:none;white-space:nowrap}.cvt th.srt:hover,.cvt th.srt.on{color:var(--pri)}.cvt th .ar{font-size:9px;margin-left:3px;opacity:.45}.cvt th.on .ar{opacity:1}
 .cvt .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-left:5px;vertical-align:middle}
 .cvr{position:sticky;top:8px}.cvo{margin-bottom:10px;row-gap:6px}
 .plotbox{background:#fff;border:1px solid #dfe3ea;border-radius:8px;overflow:hidden;min-height:200px}
@@ -303,10 +304,15 @@ V.icc=async()=>{if(!need("run"))return;const r=await runData(),sec=S.csec||"TV",
  const O=S.cv||(S.cv={mode:"icc",group:false,se:false,obs:false,leg:true,bins:10,ax:{}}),st=S.sel[sec],its=r.items.filter(x=>x.Test==sec);
  const sw=(id,a,b,on)=>`<label class="tg"><input type="checkbox" id="${id}" ${on?"checked":""}><span class="l0">${a}</span><span class="tr"></span><span class="l1">${b}</span></label>`;
  const ai=(id,v,ph,w)=>`<input id="${id}" value="${esc(v??"")}" placeholder="${ph}" style="width:${w}">`;
+ const COLS=[["q","Câu"],["a","a"],["b","b"],["se_b","SE(b)"],["Infit_MSQ","Infit"],["Outfit_MSQ","Outfit"]],srt=O.sort||(O.sort={k:"q",d:1});
+ const cval=(x,k)=>k=="q"?num(x):x[k],bad=v=>v==null||v===""||!isFinite(v);
+ const rowH=x=>{const q=num(x);return `<tr data-q="${q}" class="${x.Used?"":"off"}"><td class="k"><input type="checkbox" data-q="${q}" ${st.has(q)?"checked":""} ${x.Used?"":"disabled"}><i class="dot"></i></td><td>${q}</td><td>${f2(x.a,2)}</td><td>${f2(x.b,2)}</td><td>${f2(x.se_b,2)}</td><td>${f2(x.Infit_MSQ,2)}</td><td>${f2(x.Outfit_MSQ,2)}</td></tr>`};
+ const fillTbl=()=>{$(".cvt thead").innerHTML=`<tr><th></th>${COLS.map(c=>`<th class="srt${c[0]==srt.k?" on":""}" data-c="${c[0]}" title="Bấm để sắp xếp tăng/giảm">${c[1]}<span class="ar">${c[0]==srt.k?(srt.d>0?"▲":"▼"):"↕"}</span></th>`).join("")}</tr>`;
+  $(".cvt tbody").innerHTML=[...its].sort((x,y)=>{const a=cval(x,srt.k),b=cval(y,srt.k),na=bad(a),nb=bad(b);if(na||nb)return na-nb||num(x)-num(y);return (a-b)*srt.d||num(x)-num(y)}).map(rowH).join("")};
  $("#view").innerHTML=`<div class="cvw"><div class="card cvl"><h2>Thông số câu hỏi</h2>
   <div class="row" style="flex-wrap:nowrap"><select id="cs" style="flex:1;min-width:0">${SEC.map(s=>`<option value="${s[0]}" ${s[0]==sec?"selected":""}>${s[1]}</option>`).join("")}</select><button id="ca">Chọn hết</button><button id="cn">Bỏ hết</button><button id="ci2">Đảo</button></div>
   <div class="row" style="margin:6px 0"><input id="cq" placeholder="Chọn nhanh, vd 1-5, 8, 12" style="flex:1;min-width:0"><button id="cqb">Chọn</button></div>
-  <div class="tw cvt"><table><thead><tr><th></th><th>Câu</th><th>a</th><th>b</th><th>SE(b)</th><th>Infit</th><th>Outfit</th></tr></thead><tbody>${its.map(x=>{const q=num(x);return `<tr data-q="${q}" class="${x.Used?"":"off"}"><td class="k"><input type="checkbox" data-q="${q}" ${st.has(q)?"checked":""} ${x.Used?"":"disabled"}><i class="dot"></i></td><td>${q}</td><td>${f2(x.a,2)}</td><td>${f2(x.b,2)}</td><td>${f2(x.se_b,2)}</td><td>${f2(x.Infit_MSQ,2)}</td><td>${f2(x.Outfit_MSQ,2)}</td></tr>`}).join("")}</tbody></table></div>
+  <div class="tw cvt"><table><thead></thead><tbody></tbody></table></div>
   <p class="mut" style="margin:6px 0 0">Tick câu để vẽ. Câu gạch ngang đã bị loại ở lần chạy này. <span id="cnum"></span></p></div>
  <div class="cvr"><div class="card"><div class="row cvo">${sw("tm","ICC","IIF",O.mode=="iif")}${sw("tg","Từng câu","Gộp nhóm",O.group)}
    <label class="ck"><input type="checkbox" id="tse" ${O.se?"checked":""}> Đường Error SE(θ)</label><label class="ck"><input type="checkbox" id="tob" ${O.obs?"checked":""}> Điểm quan sát</label><label class="ck"><input type="checkbox" id="tlg" ${O.leg?"checked":""}> Chú thích</label>
@@ -317,7 +323,8 @@ V.icc=async()=>{if(!need("run"))return;const r=await runData(),sec=S.csec||"TV",
    <label>Trục Y</label>${ai("ayl",O.ax.ylab,"tự động","100%")}${ai("ay0",O.ax.ymin,"tự động","100%")}${ai("ay1",O.ax.ymax,"tự động","100%")}
    <label>Trục SE</label><span class="mut" style="font-size:12px">Trục phải, từ 0 tới</span><span></span>${ai("as1",O.ax.semax,"tự động","100%")}
    <span></span><span></span><span></span><div style="text-align:right"><button id="axr">Đặt lại trục</button></div></div></div></div></div>`;
- const tb=$(".cvt tbody");let req=0;
+ fillTbl();const tb=$(".cvt tbody");let req=0;
+ $(".cvt thead").onclick=e=>{const c=e.target.closest("th")?.dataset.c;if(!c)return;if(srt.k==c)srt.d=-srt.d;else{srt.k=c;srt.d=1}fillTbl();draw()};
  const draw=async()=>{const qs=[...st].sort((a,b)=>a-b);$("#cnum").textContent=qs.length?`Đã chọn ${qs.length} câu.`:"";
   tb.querySelectorAll("tr").forEach(tr=>{const q=+tr.dataset.q,k=qs.indexOf(q);tr.querySelector("input").checked=k>=0;tr.classList.toggle("sel",k>=0);tr.querySelector(".dot").style.background=k>=0?(O.group?col:PAL[k%PAL.length]):"transparent"});
   const P=$("#cvp");if(!qs.length){S.cvName=null;P.innerHTML=`<div class="cvempty">Tick các câu ở bảng bên trái để hiển thị đường cong</div>`;return}
