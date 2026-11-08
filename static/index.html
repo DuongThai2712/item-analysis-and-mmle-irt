@@ -43,6 +43,20 @@ table.ans{border-collapse:separate;border-spacing:0;font-size:12.5px;width:max-c
 circle.pt{cursor:pointer}circle.pt:hover{stroke:var(--tx)!important;stroke-width:3!important}
 #toast{position:fixed;right:14px;bottom:14px;background:var(--tx);color:var(--bg);padding:8px 14px;border-radius:8px;display:none;max-width:420px;z-index:9}
 .sp{display:inline-block;width:14px;height:14px;border:2px solid var(--bd);border-top-color:var(--pri);border-radius:50%;animation:r 1s linear infinite;vertical-align:middle}@keyframes r{to{transform:rotate(360deg)}}
+/* ---- tab Đường cong ---- */
+.cvw{display:grid;grid-template-columns:minmax(300px,390px) minmax(0,1fr);gap:12px;align-items:start}
+@media(max-width:980px){.cvw{grid-template-columns:minmax(0,1fr)}}
+.cvl .cvt{max-height:calc(100vh - 250px)}.cvt td.k{white-space:nowrap}.cvt tr{cursor:pointer}.cvt tr.off{cursor:default}.cvt tr.sel td{background:rgba(31,95,191,.08)}
+.cvt th.srt{cursor:pointer;user-select:none;white-space:nowrap}.cvt th.srt:hover,.cvt th.srt.on{color:var(--pri)}.cvt th .ar{font-size:9px;margin-left:3px;opacity:.45}.cvt th.on .ar{opacity:1}
+.cvt .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-left:5px;vertical-align:middle}
+.cvr{position:sticky;top:8px}.cvo{margin-bottom:10px;row-gap:6px}
+.plotbox{background:#fff;border:1px solid #dfe3ea;border-radius:8px;overflow:hidden;min-height:200px}
+.cvempty{display:flex;align-items:center;justify-content:center;aspect-ratio:8/5;color:#6b7385;font-size:14px}
+.cva{display:grid;grid-template-columns:70px 2fr 1fr 1fr;gap:6px 8px;align-items:center;margin-top:10px}.cva label{margin:0;font-size:13px;color:var(--tx)}
+.tg{display:inline-flex;align-items:center;gap:7px;padding:3px 10px;border:1px solid var(--bd);border-radius:16px;margin:0 2px;font-size:13px;color:var(--mut);cursor:pointer;user-select:none}
+.tg input{display:none}.tg .tr{width:38px;height:20px;border-radius:10px;background:var(--pri);position:relative;flex:none}
+.tg .tr:after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:left .15s}
+.tg input:checked~.tr:after{left:21px}.tg input:not(:checked)~.l0,.tg input:checked~.l1{font-weight:700;color:var(--pri)}
 </style></head><body>
 <nav><b>Chấm thi thử</b><div id="tabs"></div></nav>
 <main>
@@ -237,27 +251,120 @@ V.noise=async()=>{if(!need("ds"))return;const j=await api("/api/ctt/"+S.ds);let 
  $("#view").onclick=e=>{if(e.target.dataset.s){S.nsec=sec=e.target.dataset.s;V.noise()}}};
 
 /* ---------- Đường cong ---------- */
-V.icc=async()=>{if(!need("run"))return;const r=await runData(),sec=S.csec||"TV",num=x=>+x.Item.slice(3);
- if(!S.sel||S.selRun!==r.id){S.selRun=r.id;S.sel=Object.fromEntries(SEC.map(s=>[s[0],new Set(r.items.filter(x=>x.Test==s[0]&&x.Used).map(num))]))}
- $("#view").innerHTML=`<div class="card"><h2>ICC · IIF · TCC · TIF</h2><div class="row"><select id="cs">${SEC.map(s=>`<option value="${s[0]}" ${s[0]==sec?"selected":""}>${s[1]}</option>`).join("")}</select>
- <button id="ca">Chọn hết</button><button id="cn">Bỏ hết</button><button id="ci2">Đảo</button><span class="mut">Số nhóm quan sát</span><input id="cb" type="number" value="${S.cbin||10}" min="3" max="30" style="width:70px" title="Số nhóm quan sát">
- <button class="p" id="cg">Vẽ</button></div><div id="ck" style="margin-top:8px"></div><p class="mut">Tick các câu cần xem (câu gạch ngang đã bị loại ở lần chạy này). ICC: expected (mô hình) và observed (các nhóm θ). IIF: thông tin từng câu. TCC/TIF: tổng của nhóm câu đã chọn (TCC có thêm điểm quan sát). Câu đã loại không được vẽ.</p></div><div id="cv"></div>`;
- const its=r.items.filter(x=>x.Test==sec),st=S.sel[sec];
- const drawCk=()=>{$("#ck").innerHTML=its.map(x=>{const q=num(x);return `<label class="ck ${x.Used?"":"off"}"><input type="checkbox" data-q="${q}" ${st.has(q)?"checked":""} ${x.Used?"":"disabled"}> ${q}</label>`}).join("")};drawCk();
- $("#ck").onchange=e=>{const q=+e.target.dataset.q;e.target.checked?st.add(q):st.delete(q)};
- $("#ca").onclick=()=>{its.filter(x=>x.Used).forEach(x=>st.add(num(x)));drawCk()};$("#cn").onclick=()=>{st.clear();drawCk()};
- $("#ci2").onclick=()=>{its.filter(x=>x.Used).forEach(x=>st.has(num(x))?st.delete(num(x)):st.add(num(x)));drawCk()};
+const PAL=["#1f5fbf","#d62728","#e08a00","#2ca02c","#9467bd","#8c564b","#e377c2","#17becf","#7f7f7f","#bcbd22","#0b3d91","#ff7f0e"];
+const CVW=800,CVH=500,CVF="system-ui,'Segoe UI',Arial,sans-serif";
+const nstep=(r,n)=>{const s=r/n,p=10**Math.floor(Math.log10(s)),f=s/p;return (f<1.5?1:f<3?2:f<7?5:10)*p};
+const nticks=(a,b,n)=>{const st=nstep(b-a,n),o=[];for(let v=Math.ceil(a/st-1e-9)*st;v<=b+1e-9;v+=st)o.push(+v.toFixed(10));return o};
+const nceil=v=>{if(!(v>0))return 1;const st=nstep(v,5);return Math.ceil(v/st-1e-9)*st};
+const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const numOr=(v,d)=>v===""||v==null||!isFinite(+v)?d:+v;
+function qlist(qs){return qs.length<=15?qs.join(", "):qs.slice(0,12).join(", ")+", …, "+qs[qs.length-1]}
+/* dựng SVG theme trắng; mọi màu ghi trực tiếp để xuất hình giữ nguyên */
+function cvPlot(j,o){
+ const se=o.se,m={l:64,r:se?66:22,t:62,b:54},pw=CVW-m.l-m.r,ph=CVH-m.t-m.b,th=j.theta,icc=o.mode=="icc",A=o.ax;
+ const ser=o.group?[{y:icc?j.tcc.exp:j.tif.y,se:j.tif.se,c:o.col,lab:icc?`Nhóm ${j.tcc.n} câu`:`Nhóm ${j.tif.n} câu`,ox:j.tcc.obs_x,oy:j.tcc.obs_y}]
+  :j.items.map((i,k)=>({y:icc?i.exp:i.iif,se:i.iif.map(v=>1/Math.sqrt(Math.max(v,1e-12))),c:PAL[k%PAL.length],lab:"Câu "+i.item,ox:i.obs_x,oy:i.obs_y,it:i}));
+ const x0=numOr(A.xmin,-6),x1=Math.max(numOr(A.xmax,6),x0+.1),inX=th.map(t=>t>=x0&&t<=x1);
+ let ya=0,yb=icc?(o.group?j.tcc.n:1):nceil(Math.max(...ser.flatMap(s=>s.y.filter((v,i)=>inX[i])),1e-3)*1.08);
+ const y0=numOr(A.ymin,ya),y1=Math.max(numOr(A.ymax,yb),y0+1e-6);
+ const seMin=Math.min(...ser.flatMap(s=>s.se.filter((v,i)=>inX[i]))),s1=Math.max(numOr(A.semax,nceil(seMin*4)),1e-6);
+ const X=v=>m.l+(v-x0)/(x1-x0)*pw,Y=v=>m.t+ph-(v-y0)/(y1-y0)*ph,YS=v=>m.t+ph-v/s1*ph,cl=(v,a,b)=>Math.max(a-ph,Math.min(b+ph,v));
+ const T=(x,y,t,st="")=>`<text x="${x}" y="${y}" style="font-family:${CVF};font-size:12px;fill:#333;${st}">${t}</text>`;
+ let s=`<rect width="${CVW}" height="${CVH}" style="fill:#fff"/><defs><clipPath id="cvc"><rect x="${m.l}" y="${m.t}" width="${pw}" height="${ph}"/></clipPath></defs>`;
+ s+=T(CVW/2,26,esc(o.title),"font-size:17px;font-weight:700;fill:#1d2330;text-anchor:middle")+T(CVW/2,45,esc(o.sub),"font-size:12px;fill:#6b7385;text-anchor:middle");
+ nticks(x0,x1,12).forEach(v=>s+=`<line x1="${X(v)}" x2="${X(v)}" y1="${m.t}" y2="${m.t+ph}" style="stroke:#e8ebf0"/><line x1="${X(v)}" x2="${X(v)}" y1="${m.t+ph}" y2="${m.t+ph+5}" style="stroke:#555"/>`+T(X(v),m.t+ph+19,+v.toFixed(4),"text-anchor:middle"));
+ nticks(y0,y1,10).forEach(v=>s+=`<line y1="${Y(v)}" y2="${Y(v)}" x1="${m.l}" x2="${m.l+pw}" style="stroke:#e8ebf0"/><line y1="${Y(v)}" y2="${Y(v)}" x1="${m.l-5}" x2="${m.l}" style="stroke:#555"/>`+T(m.l-8,Y(v)+4,+v.toFixed(4),"text-anchor:end"));
+ if(se)nticks(0,s1,8).forEach(v=>s+=`<line y1="${YS(v)}" y2="${YS(v)}" x1="${m.l+pw}" x2="${m.l+pw+5}" style="stroke:#c2372f"/>`+T(m.l+pw+8,YS(v)+4,+v.toFixed(4),"fill:#c2372f"));
+ s+=`<rect x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" style="fill:none;stroke:#555"/><g clip-path="url(#cvc)">`;
+ const pl=(ys,f)=>th.map((t,i)=>[X(t),f(ys[i])]).filter(p=>isFinite(p[1])).map(p=>p[0].toFixed(1)+","+cl(p[1],m.t,m.t+ph).toFixed(1)).join(" ");
+ ser.forEach((q,k)=>{if(se)s+=`<polyline class="cur" data-k="${k}" points="${pl(q.se,YS)}" style="fill:none;stroke:${q.c};stroke-width:1.4;stroke-dasharray:6 4"/>`;
+  s+=`<polyline class="cur" data-k="${k}" data-w="${o.group?2.6:2}" points="${pl(q.y,Y)}" style="fill:none;stroke:${q.c};stroke-width:${o.group?2.6:2}"/>`;
+  if(icc&&o.obs)s+=q.ox.map((x,i)=>isFinite(q.oy[i])?`<circle class="cur" data-k="${k}" cx="${X(x)}" cy="${Y(q.oy[i])}" r="3.6" style="fill:${o.group?"#1d2330":q.c};stroke:#fff;stroke-width:1"/>`:"").join("")});
+ s+=`<g class="hov" style="display:none"><line y1="${m.t}" y2="${m.t+ph}" style="stroke:#999;stroke-dasharray:3 3"/><circle r="5" style="fill:none;stroke:#1d2330;stroke-width:2"/></g></g>`;
+ s+=T(m.l+pw/2,CVH-12,esc(A.xlab||"Theta (θ)"),"font-size:13px;text-anchor:middle");
+ s+=`<text transform="translate(18 ${m.t+ph/2}) rotate(-90)" style="font-family:${CVF};font-size:13px;fill:#333;text-anchor:middle">${esc(A.ylab||(icc?(o.group?"Điểm kỳ vọng":"Xác suất trả lời đúng"):"Thông tin"))}</text>`;
+ if(se)s+=`<text transform="translate(${CVW-14} ${m.t+ph/2}) rotate(90)" style="font-family:${CVF};font-size:13px;fill:#c2372f;text-anchor:middle">Sai số chuẩn SE(θ)</text>`;
+ if(o.leg){const L=ser.slice(0,14).map(q=>[q.c,q.lab,0]);if(ser.length>14)L.push(["",`… +${ser.length-14} câu`,2]);
+  if(se)L.push(["#666","SE(θ) (nét đứt)",1]);if(icc&&o.obs)L.push([o.group?"#1d2330":"#666","Quan sát (nhóm θ)",3]);
+  const lw=Math.max(...L.map(l=>l[1].length))*6.6+42,lh=L.length*17+10,lx=icc?m.l+10:m.l+pw-lw-10,ly=m.t+10;
+  s+=`<g class="leg"><rect x="${lx}" y="${ly}" width="${lw}" height="${lh}" rx="4" style="fill:#fff;fill-opacity:.92;stroke:#cfd5df"/>`;
+  L.forEach((l,i)=>{const yy=ly+17+i*17;if(l[2]==3)s+=`<circle cx="${lx+20}" cy="${yy-4}" r="3.6" style="fill:${l[0]}"/>`;else if(l[2]!=2)s+=`<line x1="${lx+8}" x2="${lx+32}" y1="${yy-4}" y2="${yy-4}" style="stroke:${l[0]};stroke-width:${l[2]?1.4:2.4};${l[2]?"stroke-dasharray:6 4":""}"/>`;
+   s+=T(lx+38,yy,esc(l[1]),"font-size:11.5px")});s+=`</g>`}
+ return {svg:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CVW} ${CVH}" width="100%" style="display:block">${s}</svg>`,X,Y,YS,ser,m,pw,ph,x0,x1,th}}
+function cvSave(fmt){const sv=$("#cvp svg");if(!sv)return toast("Chưa có hình để xuất");const c=sv.cloneNode(true);c.querySelectorAll(".hov").forEach(n=>n.remove());
+ c.querySelectorAll(".cur").forEach(n=>{n.style.opacity="";if(n.dataset.w)n.style.strokeWidth=n.dataset.w});c.setAttribute("width",CVW);c.setAttribute("height",CVH);
+ const str='<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(c),name=S.cvName||"duong_cong";
+ const send=(f,d)=>{const fm=document.createElement("form");fm.method="POST";fm.action="/api/figure";fm.style.display="none";
+  Object.entries({fmt:f,name,data:d}).forEach(([k,v])=>{const i=document.createElement("input");i.type="hidden";i.name=k;i.value=v;fm.appendChild(i)});document.body.appendChild(fm);fm.submit();fm.remove()};
+ if(fmt=="svg")return send("svg",str);
+ const img=new Image(),sc=3;img.onload=()=>{const cv=document.createElement("canvas");cv.width=CVW*sc;cv.height=CVH*sc;const g=cv.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,cv.width,cv.height);g.drawImage(img,0,0,cv.width,cv.height);send("png",cv.toDataURL("image/png"))};
+ img.onerror=()=>toast("Không chuyển được hình sang PNG");img.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(str)}
+V.icc=async()=>{if(!need("run"))return;const r=await runData(),sec=S.csec||"TV",num=x=>+x.Item.slice(3),secNm=SEC.find(s=>s[0]==sec)[1],col=SEC.find(s=>s[0]==sec)[2];
+ if(!S.sel||S.selRun!==r.id){S.selRun=r.id;S.sel=Object.fromEntries(SEC.map(s=>[s[0],new Set()]))}
+ const O=S.cv||(S.cv={mode:"icc",group:false,se:false,obs:false,leg:true,bins:10,ax:{}}),st=S.sel[sec],its=r.items.filter(x=>x.Test==sec);
+ const sw=(id,a,b,on)=>`<label class="tg"><input type="checkbox" id="${id}" ${on?"checked":""}><span class="l0">${a}</span><span class="tr"></span><span class="l1">${b}</span></label>`;
+ const ai=(id,v,ph,w)=>`<input id="${id}" value="${esc(v??"")}" placeholder="${ph}" style="width:${w}">`;
+ const COLS=[["q","Câu"],["a","a"],["b","b"],["se_b","SE(b)"],["Infit_MSQ","Infit"],["Outfit_MSQ","Outfit"]],srt=O.sort||(O.sort={k:"q",d:1});
+ const cval=(x,k)=>k=="q"?num(x):x[k],bad=v=>v==null||v===""||!isFinite(v);
+ const rowH=x=>{const q=num(x);return `<tr data-q="${q}" class="${x.Used?"":"off"}"><td class="k"><input type="checkbox" data-q="${q}" ${st.has(q)?"checked":""} ${x.Used?"":"disabled"}><i class="dot"></i></td><td>${q}</td><td>${f2(x.a,2)}</td><td>${f2(x.b,2)}</td><td>${f2(x.se_b,2)}</td><td>${f2(x.Infit_MSQ,2)}</td><td>${f2(x.Outfit_MSQ,2)}</td></tr>`};
+ const fillTbl=()=>{$(".cvt thead").innerHTML=`<tr><th></th>${COLS.map(c=>`<th class="srt${c[0]==srt.k?" on":""}" data-c="${c[0]}" title="Bấm để sắp xếp tăng/giảm">${c[1]}<span class="ar">${c[0]==srt.k?(srt.d>0?"▲":"▼"):"↕"}</span></th>`).join("")}</tr>`;
+  $(".cvt tbody").innerHTML=[...its].sort((x,y)=>{const a=cval(x,srt.k),b=cval(y,srt.k),na=bad(a),nb=bad(b);if(na||nb)return na-nb||num(x)-num(y);return (a-b)*srt.d||num(x)-num(y)}).map(rowH).join("")};
+ $("#view").innerHTML=`<div class="cvw"><div class="card cvl"><h2>Thông số câu hỏi</h2>
+  <div class="row" style="flex-wrap:nowrap"><select id="cs" style="flex:1;min-width:0">${SEC.map(s=>`<option value="${s[0]}" ${s[0]==sec?"selected":""}>${s[1]}</option>`).join("")}</select><button id="ca">Chọn hết</button><button id="cn">Bỏ hết</button><button id="ci2">Đảo</button></div>
+  <div class="row" style="margin:6px 0"><input id="cq" placeholder="Chọn nhanh, vd 1-5, 8, 12" style="flex:1;min-width:0"><button id="cqb">Chọn</button></div>
+  <div class="tw cvt"><table><thead></thead><tbody></tbody></table></div>
+  <p class="mut" style="margin:6px 0 0">Tick câu để vẽ. Câu gạch ngang đã bị loại ở lần chạy này. <span id="cnum"></span></p></div>
+ <div class="cvr"><div class="card"><div class="row cvo">${sw("tm","ICC","IIF",O.mode=="iif")}${sw("tg","Từng câu","Gộp nhóm",O.group)}
+   <label class="ck"><input type="checkbox" id="tse" ${O.se?"checked":""}> Đường Error SE(θ)</label><label class="ck"><input type="checkbox" id="tob" ${O.obs?"checked":""}> Điểm quan sát</label><label class="ck"><input type="checkbox" id="tlg" ${O.leg?"checked":""}> Chú thích</label>
+   <span class="mut">Nhóm θ</span><input id="cb" type="number" value="${O.bins}" min="3" max="30" style="width:58px" title="Số nhóm θ cho điểm quan sát">
+   <span style="flex:1"></span><button id="xp">Xuất PNG</button><button id="xs">Xuất SVG</button></div>
+  <div id="cvp" class="plotbox"></div>
+  <div class="cva"><label>Trục X</label>${ai("axl",O.ax.xlab,"Theta (θ)","100%")}${ai("ax0",O.ax.xmin,"-6","100%")}${ai("ax1",O.ax.xmax,"6","100%")}
+   <label>Trục Y</label>${ai("ayl",O.ax.ylab,"tự động","100%")}${ai("ay0",O.ax.ymin,"tự động","100%")}${ai("ay1",O.ax.ymax,"tự động","100%")}
+   <label>Trục SE</label><span class="mut" style="font-size:12px">Trục phải, từ 0 tới</span><span></span>${ai("as1",O.ax.semax,"tự động","100%")}
+   <span></span><span></span><span></span><div style="text-align:right"><button id="axr">Đặt lại trục</button></div></div></div></div></div>`;
+ fillTbl();const tb=$(".cvt tbody");let req=0;
+ $(".cvt thead").onclick=e=>{const c=e.target.closest("th")?.dataset.c;if(!c)return;if(srt.k==c)srt.d=-srt.d;else{srt.k=c;srt.d=1}fillTbl();draw()};
+ const draw=async()=>{const qs=[...st].sort((a,b)=>a-b);$("#cnum").textContent=qs.length?`Đã chọn ${qs.length} câu.`:"";
+  tb.querySelectorAll("tr").forEach(tr=>{const q=+tr.dataset.q,k=qs.indexOf(q);tr.querySelector("input").checked=k>=0;tr.classList.toggle("sel",k>=0);tr.querySelector(".dot").style.background=k>=0?(O.group?col:PAL[k%PAL.length]):"transparent"});
+  const P=$("#cvp");if(!qs.length){S.cvName=null;P.innerHTML=`<div class="cvempty">Tick các câu ở bảng bên trái để hiển thị đường cong</div>`;return}
+  const key=[S.run,sec,qs.join(","),O.bins].join("|"),my=++req;let j=S.cvCache?.key==key?S.cvCache.j:null;
+  if(!j){try{j=await post("/api/curves",{run:S.run,section:sec,items:qs.join(","),bins:O.bins})}catch(e){if(my==req)P.innerHTML=`<div class="cvempty bad">Không vẽ được: ${esc(e.message)}</div>`;return}
+   if(my!=req)return;S.cvCache={key,j}}
+  if(!j.items.length){P.innerHTML=`<div class="cvempty">Không có câu hợp lệ để vẽ.</div>`;return}
+  const nm=O.mode.toUpperCase(),iq=j.items.map(i=>i.item),title=O.group?`${nm} - ${iq.length} câu`:`${nm} - Câu ${qlist(iq)}`;
+  S.cvName=`${nm}_${sec}_`+(O.group?`nhom_${iq.length}_cau`:"cau_"+(iq.length<=8?iq.join("-"):iq[0]+"-"+iq[iq.length-1]+"_"+iq.length+"cau"));
+  const sub=secNm+(O.group?` · Câu ${qlist(iq)}`:"")+(j.excluded.length?` · Bỏ qua câu đã loại: ${j.excluded.join(", ")}`:"");
+  const G=cvPlot(j,{...O,col,title,sub});P.innerHTML=G.svg;const sv=P.querySelector("svg"),hv=sv.querySelector(".hov"),tip=$("#tip"),curs=[...sv.querySelectorAll(".cur")];
+  const clear=()=>{hv.style.display="none";tip.style.display="none";curs.forEach(c=>{c.style.opacity="";if(c.dataset.w)c.style.strokeWidth=c.dataset.w})};
+  sv.onmouseleave=clear;
+  sv.onmousemove=e=>{const pt=sv.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const p=pt.matrixTransform(sv.getScreenCTM().inverse());
+   if(p.x<G.m.l||p.x>G.m.l+G.pw||p.y<G.m.t||p.y>G.m.t+G.ph)return clear();
+   const t=G.x0+(p.x-G.m.l)/G.pw*(G.x1-G.x0),th=G.th,k=Math.max(0,Math.min(th.length-1,Math.round((t-th[0])/(th[1]-th[0]))));
+   let bi=0,bd=1e9,bs=false;G.ser.forEach((q,i)=>{const d=Math.abs(G.Y(q.y[k])-p.y);if(d<bd){bd=d;bi=i;bs=false}if(O.se){const d2=Math.abs(G.YS(q.se[k])-p.y);if(d2<bd){bd=d2;bi=i;bs=true}}});
+   const q=G.ser[bi],x=G.X(th[k]),yv=bs?G.YS(q.se[k]):G.Y(q.y[k]);hv.style.display="";hv.querySelector("line").setAttribute("x1",x);hv.querySelector("line").setAttribute("x2",x);
+   const c=hv.querySelector("circle");c.setAttribute("cx",x);c.setAttribute("cy",Math.max(G.m.t,Math.min(G.m.t+G.ph,yv)));
+   if(!O.group)curs.forEach(cc=>{const on=+cc.dataset.k==bi;cc.style.opacity=on?"":".18";if(cc.dataset.w)cc.style.strokeWidth=on?3.2:cc.dataset.w});
+   const val=`θ = ${f2(th[k],2)} · ${O.mode=="icc"?(O.group?"Điểm kỳ vọng":"P"):"I"} = ${f2(q.y[k],3)}`+(O.se||bs?` · SE = ${f2(q.se[k],3)}`:"");
+   const it=q.it,ri=it&&r.items.find(x=>x.Test==sec&&num(x)==it.item);
+   tip.innerHTML=it?`<b style="color:${q.c}">Câu ${it.item}</b> <span class="mut">${secNm}</span><br>a = ${f2(it.a,3)} <span class="mut">(SE ${f2(ri?.se_a,3)})</span><br>b = ${f2(it.b,3)} <span class="mut">(SE ${f2(ri?.se_b,3)})</span><br>Infit ${f2(it.infit,2)} · Outfit ${f2(it.outfit,2)}${ri?.Fit_Label?` · ${esc(ri.Fit_Label)}`:""}<br>${val}`
+    :`<b>${q.lab}</b> <span class="mut">${secNm}</span><br>${val}`;
+   tip.style.display="block";const w=tip.offsetWidth,h=tip.offsetHeight;tip.style.left=Math.min(e.clientX+16,innerWidth-w-8)+"px";tip.style.top=(e.clientY+16+h>innerHeight?e.clientY-h-12:e.clientY+16)+"px"}};
+ tb.onchange=e=>{const q=+e.target.dataset.q;if(!q)return;e.target.checked?st.add(q):st.delete(q);draw()};
+ tb.onclick=e=>{if(e.target.tagName=="INPUT")return;const tr=e.target.closest("tr"),ip=tr?.querySelector("input");if(!ip||ip.disabled)return;ip.checked=!ip.checked;tb.onchange({target:ip})};
+ const used=its.filter(x=>x.Used).map(num);
+ $("#ca").onclick=()=>{used.forEach(q=>st.add(q));draw()};$("#cn").onclick=()=>{st.clear();draw()};$("#ci2").onclick=()=>{used.forEach(q=>st.has(q)?st.delete(q):st.add(q));draw()};
+ $("#cqb").onclick=()=>{const v=$("#cq").value,ok=[];v.split(/[,;\s]+/).forEach(t=>{const m=t.match(/^(\d+)-(\d+)$/);if(m){for(let i=+m[1];i<=+m[2];i++)ok.push(i)}else if(/^\d+$/.test(t))ok.push(+t)});
+  const hit=ok.filter(q=>used.includes(q));if(!hit.length)return toast("Không có câu hợp lệ trong phần "+secNm);st.clear();hit.forEach(q=>st.add(q));draw()};
+ $("#cq").onkeydown=e=>{if(e.key=="Enter")$("#cqb").click()};
  $("#cs").onchange=e=>{S.csec=e.target.value;V.icc()};
- $("#cg").onclick=async()=>{S.csec=$("#cs").value;S.cbin=+$("#cb").value;if(!st.size)return toast("Hãy tick ít nhất một câu");$("#cv").innerHTML='<div class="card mut">Đang vẽ…</div>';
-  try{const j=await post("/api/curves",{run:S.run,section:S.csec,items:[...st].sort((a,b)=>a-b).join(","),bins:S.cbin});const col=SEC.find(s=>s[0]==S.csec)[2];let h="";
-  if(j.excluded.length)h+=`<div class="card mut">Câu đã loại, không vẽ: ${j.excluded.join(", ")}</div>`;
-  if(!j.items.length)h+=`<div class="card mut">Không có câu hợp lệ trong phần này. Số câu phải thuộc đúng phần đã chọn.</div>`;
-  if(j.tcc)h+=`<div class="g g3"><div class="card">${chart({title:`TCC — ${j.tcc.n} câu`,xl:[-6,6],yl:[0,j.tcc.n],xlab:"Theta",ylab:"Điểm thô",nx:12,series:[{x:j.theta,y:j.tcc.exp,c:col,label:"Kỳ vọng"},{x:j.tcc.obs_x,y:j.tcc.obs_y,c:"var(--obs)",pts:1,label:"Quan sát"}]})}</div>
-   <div class="card">${chart({title:`TIF — ${j.tif.n} câu`,xl:[-6,6],yl:[0,Math.max(...j.tif.y)*1.1],xlab:"Theta",ylab:"Thông tin",nx:12,series:[{x:j.theta,y:j.tif.y,c:col,label:"Thông tin"},{x:j.theta,y:j.tif.se.map(v=>Math.min(v,Math.max(...j.tif.y)*1.1)),c:"#d62728",dash:1,label:"SE(θ)"}]})}</div></div>`;
-  h+=`<div class="g g3">`+j.items.slice(0,40).map(i=>`<div class="card">${chart({title:`ICC Câu ${i.item} — a=${f2(i.a,2)}, b=${f2(i.b,2)}`,xl:[-6,6],yl:[0,1],xlab:"Theta",ylab:"P",nx:6,h:260,
-   series:[{x:j.theta,y:i.exp,c:col,label:"Expected"},{x:i.obs_x,y:i.obs_y,c:"var(--obs)",pts:1,label:"Observed"}],notes:[`Infit ${f2(i.infit,2)} · Outfit ${f2(i.outfit,2)}`]})}</div><div class="card">${chart({title:`IIF Câu ${i.item}`,xl:[-6,6],yl:[0,Math.max(...i.iif,0.01)*1.1],xlab:"Theta",ylab:"Thông tin",nx:6,h:260,series:[{x:j.theta,y:i.iif,c:col}]})}</div>`).join("")+`</div>`;
-  if(j.items.length>40)h+=`<div class="card mut">Chỉ hiển thị 40 câu đầu, hãy thu hẹp danh sách câu.</div>`;$("#cv").innerHTML=h}catch(e){$("#cv").innerHTML=`<div class="card bad">Không vẽ được: ${e.message}</div>`}};
-};
+ $("#tm").onchange=e=>{O.mode=e.target.checked?"iif":"icc";draw()};$("#tg").onchange=e=>{O.group=e.target.checked;draw()};
+ $("#tse").onchange=e=>{O.se=e.target.checked;draw()};$("#tob").onchange=e=>{O.obs=e.target.checked;draw()};$("#tlg").onchange=e=>{O.leg=e.target.checked;draw()};
+ $("#cb").onchange=e=>{O.bins=Math.max(3,Math.min(30,+e.target.value||10));draw()};
+ [["axl","xlab"],["ax0","xmin"],["ax1","xmax"],["ayl","ylab"],["ay0","ymin"],["ay1","ymax"],["as1","semax"]].forEach(([id,k])=>$("#"+id).onchange=e=>{O.ax[k]=e.target.value.trim();draw()});
+ $("#axr").onclick=()=>{O.ax={};document.querySelectorAll(".cva input").forEach(i=>i.value="");draw()};
+ $("#xp").onclick=()=>cvSave("png");$("#xs").onclick=()=>cvSave("svg");
+ draw()};
 
 /* ---------- Neo đề ---------- */
 V.link=async()=>{const L=await api("/api/links");
