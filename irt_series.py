@@ -60,10 +60,11 @@ def run_irt_series(series_list, exclude=None, interactive=False,
     exclude     : dict {tên phần: danh sách câu cần loại}, ví dụ {'TV': [3, 4, 14, 30], 'TA': 'Cau5, Cau7'}
     interactive : True -> hỏi nhập từ bàn phím cho phần nào chưa có trong `exclude`
     n_items     : tự lấy theo số cột câu hỏi của từng phần (sau khi loại câu).
-    **fit_kwargs: chuyển thẳng cho irt.fit_2pl, ví dụ msq_range=(0.5, 1.5), lz_cut=-2.0, fit_stats=False.
+    **fit_kwargs: chuyển thẳng cho irt.fit_irt, ví dụ model=3, a_bounds=(0.05, 4), b_bounds=(-6, 6),
+                  msq_range=(0.5, 1.5), lz_cut=-2.0, fit_stats=False.
 
     Trả về:
-      items_all   : index (Test, Item), cột a, b, se_a, se_b, Infit_MSQ, Outfit_MSQ, Fit_Label, Chi2, Chi2_df, p_value,
+      items_all   : index (Test, Item), cột a, b, c, d, se_a, se_b, se_c, se_d, Infit_MSQ, Outfit_MSQ, Fit_Label, Chi2, Chi2_df, p_value,
                     Used (False = câu bị loại, các giá trị = NaN)
       persons_all : index (Test, chỉ số gốc), cột SBD, Theta, SE, Lz, Infit_MSQ, Outfit_MSQ, Flag_Lz, Flag_MSQ, Flag
     Mỗi df gốc được thêm cột RawKept (điểm thô tính trên các câu được giữ), Theta, SE.
@@ -102,7 +103,7 @@ def run_irt_series(series_list, exclude=None, interactive=False,
             print(f"[{name}] số câu = {n_total}, loại {len(excluded)} {excluded}, dùng {n_items}; "
                   f"hợp lệ {valid_mask.sum()}/{len(df_original)}, sai hết {all_wrong.sum()}, đúng hết {all_right.sum()}")
 
-        items_fit, persons_valid = irt.fit_2pl(
+        items_fit, persons_valid = irt.fit_irt(
             df_original.loc[valid_mask, kept], verbose=verbose, theta_method=theta_method,
             a_init=_slice_init(a_init, name, end_idx, n_total, keep_pos),
             b_init=_slice_init(b_init, name, end_idx, n_total, keep_pos), **fit_kwargs)
@@ -144,9 +145,25 @@ def run_irt_series(series_list, exclude=None, interactive=False,
     return items_all, persons_all
 
 
-def cal_true_score(df, item_params, scale_max=300):
-    """item_params: items_all.loc[tên phần]. Chỉ dùng các câu Used; điểm thô lấy từ RawKept."""
+def true_score_params(item_params, pl=4):
+    """
+    Bảng tham số dùng để tính điểm thực theo pl = 2 (a, b), 3 (a, b, c) hoặc 4 (a, b, c, d).
+    Tham số không dùng hoặc không được ước lượng nhận giá trị mặc định (c = 0, d = 1).
+    """
+    pl = int(pl)
+    p = item_params.copy()
+    p["c"] = p["c"].fillna(irt.C_DEFAULT) if pl >= 3 and "c" in p.columns else irt.C_DEFAULT
+    p["d"] = p["d"].fillna(irt.D_DEFAULT) if pl >= 4 and "d" in p.columns else irt.D_DEFAULT
+    return p
+
+
+def cal_true_score(df, item_params, scale_max=300, pl=4):
+    """
+    item_params: items_all.loc[tên phần]. Chỉ dùng các câu Used; điểm thô lấy từ RawKept.
+    pl: tính điểm thực theo 2, 3 hoặc 4 tham số (xem true_score_params).
+    """
     p = item_params[item_params["Used"]] if "Used" in item_params.columns else item_params
+    p = true_score_params(p, pl)
     cols = list(p.index)
     df["True"] = df.apply(
         lambda row: irt.true_score(theta=row["Theta"], raw=row["RawKept"],
