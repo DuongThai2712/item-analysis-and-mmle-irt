@@ -128,13 +128,32 @@ def setup_style():
 # ----------------------------------------------------------------------------------------------
 # Hàm IRT (thang logit: a_L = D * a)
 # ----------------------------------------------------------------------------------------------
-def p_logit(theta, a_L, b):
+def p_logit(theta, a_L, b, c=None, d=None):
+    """P = c + (d - c) * expit(a_L (theta - b)); c, d = None -> 0, 1 (2PL)."""
     theta = np.atleast_1d(np.asarray(theta, float))
-    return expit(np.asarray(a_L, float)[None, :] * (theta[:, None] - np.asarray(b, float)[None, :]))
+    p = expit(np.asarray(a_L, float)[None, :] * (theta[:, None] - np.asarray(b, float)[None, :]))
+    if c is None and d is None:
+        return p
+    c = 0.0 if c is None else np.nan_to_num(np.asarray(c, float), nan=0.0)[None, :]
+    d = 1.0 if d is None else np.nan_to_num(np.asarray(d, float), nan=1.0)[None, :]
+    return c + (d - c) * p
 
 
-def tcc_logit(theta, a_L, b):
-    return p_logit(theta, a_L, b).sum(axis=1)
+def tcc_logit(theta, a_L, b, c=None, d=None):
+    return p_logit(theta, a_L, b, c, d).sum(axis=1)
+
+
+def cd_columns(df, args):
+    """(c, d) từ cột c, d của bảng tham số theo lựa chọn args.link_params; None nếu không dùng."""
+    lp = getattr(args, "link_params", "ab") or "ab"
+    get = lambda k, dv: (np.nan_to_num(pd.to_numeric(df[k], errors="coerce").to_numpy(float), nan=dv)
+                         if k in df.columns else np.full(len(df), dv))
+    return (get("c", 0.0) if "c" in lp else None), (get("d", 1.0) if "d" in lp else None)
+
+
+def _sub(x, m):
+    """Lấy x[m] nếu x không phải None (tham số c/d tuỳ chọn)."""
+    return None if x is None else np.asarray(x, float)[m]
 
 
 def to_irt(a_L):
@@ -172,18 +191,22 @@ def mean_mean(ax, bx, ay, by):
     return A, np.mean(by) - A * np.mean(bx)
 
 
-def sl_components(A, B, ax, bx, ay, by, thx, wx, thy, wy, symmetric=True):
-    """Trả về (SLcrit_X, SLcrit_Y). SLcrit_X: lưới nhóm X (thang X); SLcrit_Y: lưới nhóm Y (thang Y)."""
-    d1 = tcc_logit(A * thx + B, ay, by) - tcc_logit(thx, ax, bx)
+def sl_components(A, B, ax, bx, ay, by, thx, wx, thy, wy, symmetric=True, cx=None, dx=None, cy=None, dy=None):
+    """
+    Trả về (SLcrit_X, SLcrit_Y). SLcrit_X: lưới nhóm X (thang X); SLcrit_Y: lưới nhóm Y (thang Y).
+    cx, dx, cy, dy: tham số c, d (3PL/4PL) của câu neo; c, d không đổi khi đổi thang theta.
+    """
+    d1 = tcc_logit(A * thx + B, ay, by, cy, dy) - tcc_logit(thx, ax, bx, cx, dx)
     c1 = float(np.sum(wx * d1 ** 2))
     c2 = 0.0
     if symmetric:
-        d2 = tcc_logit(thy, ay, by) - tcc_logit((thy - B) / A, ax, bx)
+        d2 = tcc_logit(thy, ay, by, cy, dy) - tcc_logit((thy - B) / A, ax, bx, cx, dx)
         c2 = float(np.sum(wy * d2 ** 2))
     return c1, c2
 
 
-def fit_stocking_lord(ax, bx, ay, by, thx, wx, thy, wy, symmetric=True, x0=None, fast=False):
+def fit_stocking_lord(ax, bx, ay, by, thx, wx, thy, wy, symmetric=True, x0=None, fast=False,
+                      cx=None, dx=None, cy=None, dy=None):
     """
     Tối thiểu hoá SLcrit theo (A, B); tối ưu theo (log A, B) để A > 0.
     Mặc định đa khởi đầu (mean/sigma, mean/mean, (1,0)). Với bootstrap: x0=(log A, B) của nghiệm đầy đủ
@@ -191,7 +214,7 @@ def fit_stocking_lord(ax, bx, ay, by, thx, wx, thy, wy, symmetric=True, x0=None,
     """
     def crit(p):
         A, B = np.exp(p[0]), p[1]
-        c1, c2 = sl_components(A, B, ax, bx, ay, by, thx, wx, thy, wy, symmetric)
+        c1, c2 = sl_components(A, B, ax, bx, ay, by, thx, wx, thy, wy, symmetric, cx, dx, cy, dy)
         return c1 + c2
 
     if x0 is not None:
@@ -214,10 +237,10 @@ def fit_stocking_lord(ax, bx, ay, by, thx, wx, thy, wy, symmetric=True, x0=None,
     return A, B, float(best.fun)
 
 
-def anchor_rmsd(A, B, ax, bx, ay, by, thy, wy):
+def anchor_rmsd(A, B, ax, bx, ay, by, thy, wy, cx=None, dx=None, cy=None, dy=None):
     """RMSD (có trọng số) giữa ICC của từng câu neo X (sau link) và ICC câu Y, trên lưới theta thang Y."""
-    px = p_logit(thy, ax / A, A * bx + B)
-    py = p_logit(thy, ay, by)
+    px = p_logit(thy, ax / A, A * bx + B, cx, dx)
+    py = p_logit(thy, ay, by, cy, dy)
     return np.sqrt(np.sum(wy[:, None] * (px - py) ** 2, axis=0))
 
 
@@ -310,6 +333,7 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
     aX_irt, bX = xi["a"].to_numpy(float), xi["b"].to_numpy(float)       # thang irt.py
     aX_L = args.d_x * aX_irt
     aY_L, bY = args.d_y * yi["a"].to_numpy(float), yi["b"].to_numpy(float)
+    cX, dX_, cY, dY_ = (cd_columns(xi, args) + cd_columns(yi, args))
 
     # ---------------- bài làm X: theta (MLE) + loại đúng hết / sai hết ----------------
     dX = sheets[f"{code}_X"].copy()
@@ -324,7 +348,7 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
     if args.use_sheet_theta:
         theta_x = dX["Theta"].to_numpy(float)
     else:
-        theta_x = np.array(irt.theta_estimate(Um, a=aX_irt, b=bX, method="MLE"))
+        theta_x = np.array(irt.theta_estimate(Um, a=aX_irt, b=bX, c=cX, d=dX_, method="MLE"))
     at_bound = np.abs(theta_x) >= 6.0 - 1e-3
     exclude = np.where(all_wrong, "all_wrong",
                np.where(all_right, "all_correct",
@@ -348,6 +372,10 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
     ya = Yp.set_index("id").loc[A_.Y]
     ax_irt, bx_a = xa["a"].to_numpy(float), xa["b"].to_numpy(float)
     ax_a, ay_a, by_a = args.d_x * ax_irt, args.d_y * ya["a"].to_numpy(float), ya["b"].to_numpy(float)
+    cx_a, dx_a = cd_columns(xa, args)
+    cy_a, dy_a = cd_columns(ya, args)
+    cdk = lambda m: dict(cx=_sub(cx_a, m), dx=_sub(dx_a, m), cy=_sub(cy_a, m), dy=_sub(dy_a, m))
+    allm = np.ones(len(ax_a), bool)
 
     used, reason = screen_anchors(ax_irt, bx_a, ay_a, by_a, args.a_min, args.b_max)
     reason = list(reason)
@@ -358,7 +386,7 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
     sym = not args.one_sided
 
     def fit(mask):
-        return fit_stocking_lord(ax_a[mask], bx_a[mask], ay_a[mask], by_a[mask], thx, wx, thy, wy, sym)
+        return fit_stocking_lord(ax_a[mask], bx_a[mask], ay_a[mask], by_a[mask], thx, wx, thy, wy, sym, **cdk(mask))
 
     if used.sum() < 3:
         raise SystemExit(f"{code}: chỉ còn {used.sum()} câu neo hợp lệ (<3), không link được.")
@@ -367,7 +395,7 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
     # thanh lọc neo theo RMSD ICC (tuỳ chọn)
     if args.purify is not None:
         while used.sum() > args.min_anchor:
-            r = anchor_rmsd(A, B, ax_a, bx_a, ay_a, by_a, thy, wy)
+            r = anchor_rmsd(A, B, ax_a, bx_a, ay_a, by_a, thy, wy, **cdk(allm))
             r = np.where(used, r, -1)
             j = int(np.argmax(r))
             if r[j] <= args.purify:
@@ -376,13 +404,15 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
             reason[j] = f"purify: ICC RMSD={r[j]:.3f}>{args.purify:g}"
             A, B, crit = fit(used)
 
-    c1, c2 = sl_components(A, B, ax_a[used], bx_a[used], ay_a[used], by_a[used], thx, wx, thy, wy, sym)
+    c1, c2 = sl_components(A, B, ax_a[used], bx_a[used], ay_a[used], by_a[used], thx, wx, thy, wy, sym, **cdk(used))
     A_ms, B_ms = mean_sigma(ax_a[used], bx_a[used], ay_a[used], by_a[used])
     A_mm, B_mm = mean_mean(ax_a[used], bx_a[used], ay_a[used], by_a[used])
-    tcc_diff = tcc_logit(thy, ay_a[used], by_a[used]) - tcc_logit((thy - B) / A, ax_a[used], bx_a[used])
+    k_ = cdk(used)
+    tcc_diff = (tcc_logit(thy, ay_a[used], by_a[used], k_["cy"], k_["dy"])
+                - tcc_logit((thy - B) / A, ax_a[used], bx_a[used], k_["cx"], k_["dx"]))
     tcc_rmsd = float(np.sqrt(np.sum(wy * tcc_diff ** 2)))
     tcc_maxd = float(np.max(np.abs(tcc_diff[np.abs(thy) <= 3])))
-    rm_all = anchor_rmsd(A, B, ax_a, bx_a, ay_a, by_a, thy, wy)
+    rm_all = anchor_rmsd(A, B, ax_a, bx_a, ay_a, by_a, thy, wy, **cdk(allm))
 
     # bootstrap SE (lấy mẫu lại các câu neo đã dùng)
     se_A = se_B = np.nan
@@ -397,7 +427,7 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
                 continue
             try:
                 a_, b_, _ = fit_stocking_lord(ax_a[s], bx_a[s], ay_a[s], by_a[s], thx, wx, thy, wy, sym,
-                                              x0=(np.log(A), B), fast=True)
+                                              x0=(np.log(A), B), fast=True, **cdk(s))
                 if np.isfinite(a_) and np.isfinite(b_):
                     bs.append((a_, b_))
             except Exception:
@@ -411,11 +441,18 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
     anchor_y_of = {int(x): int(y) for x, y in zip(A_.X, A_.Y)}
     used_x = {int(x) for x, u in zip(A_.X, used) if u}
     status, a_final, b_final, anc_y = [], aX_link.copy(), bX_link.copy(), []
+    c_final = None if cX is None and cY is None else (np.zeros(n_items) if cX is None else cX.copy())
+    d_final = None if dX_ is None and dY_ is None else (np.ones(n_items) if dX_ is None else dX_.copy())
+    y_idx = {int(i): k for k, i in enumerate(yi.index)}
     reason_of = {int(x): r for x, r in zip(A_.X, reason)}
     for k, i in enumerate(ids):
         if i in used_x:
             y_id = anchor_y_of[i]
             a_final[k], b_final[k] = args.d_y * Yp.set_index("id").loc[y_id, "a"], Yp.set_index("id").loc[y_id, "b"]
+            if c_final is not None:
+                c_final[k] = cY[y_idx[y_id]] if cY is not None else 0.0
+            if d_final is not None:
+                d_final[k] = dY_[y_idx[y_id]] if dY_ is not None else 1.0
             status.append("Anchor (neo theo Y)")
             anc_y.append(y_id)
         elif i in anchor_y_of:
@@ -431,6 +468,10 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
         "a_final(D=1)": a_final, "b_final": b_final,
         "a_final(irt.py)": a_final / irt.D,
     })
+    if c_final is not None:
+        x_linked["c_final"] = c_final
+    if d_final is not None:
+        x_linked["d_final"] = d_final
 
     anchor_tbl = pd.DataFrame({
         "test": code, "X_id": A_.X, "Y_id": A_.Y, "Used": used, "Reason": reason,
@@ -444,6 +485,10 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
     # ---------------- theta mới + điểm thực mới (theo TCC đề Y) ----------------
     theta_new = np.where(ok, A * theta_x_ok + B, np.nan)
     y_params = pd.DataFrame({"a": aY_L / irt.D, "b": bY}, index=items)   # thang irt.py để dùng irt.true_score
+    if cY is not None:
+        y_params["c"] = cY
+    if dY_ is not None:
+        y_params["d"] = dY_
     true_new = np.array([
         irt.true_score(theta_new[i], raw[i], pd.Series(Um[i], index=cols), y_params, scale_max=SCALE_MAX)
         for i in range(len(dX))
@@ -501,7 +546,9 @@ def process_test(code, label, lo, hi, sheets, Xp, Yp, anchors, args):
         "max|Theta_sheet - Theta_X|": theta_sheet_diff,
     }
 
+    summary["Tham số neo"] = getattr(args, "link_params", "ab")
     return dict(code=code, label=label, ids=ids, items=items, A=A, B=B, summary=summary,
+                cX=cX, dX_=dX_, cY=cY, dY_=dY_,
                 x_linked=x_linked, anchor_tbl=anchor_tbl, anchors=A_, used=used,
                 aX_irt=aX_irt, bX=bX, aX_L=aX_L, aY_L=aY_L, bY=bY,
                 aX_link=aX_link, bX_link=bX_link, ax_a=ax_a, bx_a=bx_a, ay_a=ay_a, by_a=by_a,
@@ -713,6 +760,9 @@ def parse_args(argv=None):
     ap.add_argument("--purify", type=float, default=None,
                     help="nếu đặt: lần lượt bỏ neo có ICC RMSD > ngưỡng (vd 0.15) rồi link lại")
     ap.add_argument("--min-anchor", type=int, default=8, help="số neo tối thiểu khi --purify")
+    ap.add_argument("--link-params", choices=["ab", "abc", "abcd"], default="ab",
+                    help="tham số dùng khi neo: ab (mặc định, chỉ a, b), abc (thêm c), abcd (thêm c, d); "
+                         "c, d lấy từ cột c, d của sheet X, Y (thiếu -> 0 và 1)")
     ap.add_argument("--boot", type=int, default=200, help="số lần bootstrap SE(A), SE(B); 0 = tắt")
     ap.add_argument("--seed", type=int, default=2024)
     ap.add_argument("--pct-keep-extremes", dest="pct_drop_extremes", action="store_false",

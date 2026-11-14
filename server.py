@@ -231,16 +231,27 @@ def irt_run():
         it = pd.DataFrame(json.loads(run_row(int(p["init_run"]))["items"])).set_index(["Test", "Item"])
         a_init = {c: it.loc[c]["a"].reindex([f"Cau{i}" for i in range(lo, hi + 1)]).fillna(1.0).to_numpy() for c, _, lo, hi in SEC}
         b_init = {c: it.loc[c]["b"].reindex([f"Cau{i}" for i in range(lo, hi + 1)]).fillna(0.0).to_numpy() for c, _, lo, hi in SEC}
+    model = int(p.get("model") or 2)
+    if model not in irt.MODELS: raise ValueError("Mô hình phải là 1PL, 2PL, 3PL hoặc 4PL")
+    fnum = lambda v: None if v is None or str(v).strip() == "" else float(v)
+    a_bounds = (fnum(p.get("a_min")) or 0.05, fnum(p.get("a_max")) or 4.0)
+    b_lo, b_hi = fnum(p.get("b_min")), fnum(p.get("b_max"))
+    b_bounds = None if b_lo is None and b_hi is None else (b_lo, b_hi)
+    if a_bounds[0] <= 0 or a_bounds[0] >= a_bounds[1]: raise ValueError("Giới hạn a không hợp lệ (cần 0 < a min < a max)")
+    if b_lo is not None and b_hi is not None and b_lo >= b_hi: raise ValueError("Giới hạn b không hợp lệ (cần b min < b max)")
+    true_pl = int(p.get("true_pl") or max(model, 2))
     series = [[F[c], hi, c] for c, _, _, hi in SEC]
     items, persons = irt_series.run_irt_series(series, exclude=ex, a_init=a_init, b_init=b_init,
-                                               theta_method=p.get("method", "MLE"), verbose=False)
-    for c in CODES: irt_series.cal_true_score(F[c], items.loc[c])
+                                               theta_method=p.get("method", "MLE"), verbose=False,
+                                               model=model, a_bounds=a_bounds, b_bounds=b_bounds)
+    for c in CODES: irt_series.cal_true_score(F[c], items.loc[c], pl=true_pl)
     P = ch[["SBD"]].copy()
     for c in CODES:
         P[f"{c}_Raw"], P[f"{c}_Theta"], P[f"{c}_SE"], P[f"{c}_True"] = F[c]["RawKept"], F[c]["Theta"], F[c]["SE"], F[c]["True"].astype(float)
     P["Total_True"] = P[[f"{c}_True" for c in CODES]].sum(axis=1)
     it = items.reset_index(); it["review"] = (it["p_value"] < .05) & ((it["se_b"] > 10) | (it["se_a"] > 3))
-    cfg = {"exclude": ex, "method": p.get("method", "MLE"), "init_run": p.get("init_run")}
+    cfg = {"exclude": ex, "method": p.get("method", "MLE"), "init_run": p.get("init_run"), "model": model,
+           "a_bounds": list(a_bounds), "b_bounds": list(b_bounds) if b_bounds else None, "true_pl": true_pl}
     c = db(); cur = c.execute("INSERT INTO runs(ds,kind,name,ts,config,items,persons,extra) VALUES(?,?,?,?,?,?,?,?)",
                               (ds, "irt", p.get("name") or f"Lần chạy {now()}", now(), json.dumps(cfg), json.dumps(records(it)),
                                json.dumps(records(P)), "{}")); c.commit()
@@ -272,7 +283,7 @@ def item_history(ds, item):
     out = []
     for r in db().execute("SELECT * FROM runs WHERE ds=? AND kind='irt' ORDER BY id", (ds,)):
         for it in json.loads(r["items"]):
-            if it["Item"] == item: out.append({"run": r["id"], "name": r["name"], "ts": r["ts"], **{k: it.get(k) for k in ("Used", "a", "b", "se_a", "se_b", "p_value", "Fit_Label")}})
+            if it["Item"] == item: out.append({"run": r["id"], "name": r["name"], "ts": r["ts"], **{k: it.get(k) for k in ("Used", "a", "b", "c", "d", "se_a", "se_b", "p_value", "Fit_Label")}})
     return J(out)
 
 def run_frames(rid):
@@ -281,6 +292,19 @@ def run_frames(rid):
         F[c] = F[c].merge(P[["SBD", f"{c}_Raw", f"{c}_Theta", f"{c}_SE", f"{c}_True"]].rename(
             columns={f"{c}_Raw": "RawKept", f"{c}_Theta": "Theta", f"{c}_SE": "SE", f"{c}_True": "True"}), on="SBD", how="left")
     return r, ch, ans, F, pd.DataFrame(json.loads(r["items"])).set_index(["Test", "Item"]), P
+
+@app.post("/api/run/<int:rid>/true")
+def run_true(rid):
+    """Tính lại điểm thực của lần chạy theo 2, 3 hoặc 4 tham số (θ giữ nguyên) và lưu lại."""
+    pl = int(request.get_json().get("pl", 2))
+    if pl not in (2, 3, 4): raise ValueError("Chỉ tính điểm thực theo 2, 3 hoặc 4 tham số")
+    r, ch, ans, F, items, P = run_frames(rid); cfg = json.loads(r["config"])
+    for c in CODES:
+        irt_series.cal_true_score(F[c], items.loc[c], pl=pl)
+        P[f"{c}_True"] = P[["SBD"]].merge(F[c][["SBD", "True"]], on="SBD", how="left")["True"].astype(float).to_numpy()
+    P["Total_True"] = P[[f"{c}_True" for c in CODES]].sum(axis=1); cfg["true_pl"] = pl
+    c = db(); c.execute("UPDATE runs SET persons=?, config=? WHERE id=?", (json.dumps(records(P)), json.dumps(cfg), rid)); c.commit()
+    return J({"ok": 1, "true_pl": pl})
 
 
 # ------------------------------------------------------------------ ICC / TCC
@@ -291,25 +315,36 @@ def parse_items(s):
         elif t.isdigit(): out.append(int(t))
     return sorted(set(out))
 
+def item_params4(it, name):
+    """(a, b, c, d) của một câu; lần chạy cũ không có c/d -> mặc định c = 0, d = 1."""
+    g = lambda k, dv: float(it.loc[name, k]) if k in it.columns and pd.notna(it.loc[name, k]) else dv
+    return g("a", irt.A_DEFAULT), g("b", 0.0), g("c", irt.C_DEFAULT), g("d", irt.D_DEFAULT)
+
 @app.post("/api/curves")
 def curves():
+    """use: các tham số dùng để vẽ ("abcd"); tham số không dùng nhận giá trị mặc định a = 1, c = 0, d = 1. b luôn dùng."""
     p = request.get_json(); r, ch, ans, F, items, P = run_frames(int(p["run"]))
     code = p["section"]; lo, hi = next((a, b) for c, _, a, b in SEC if c == code)
     sel = [q for q in (parse_items(p.get("items", "")) or range(lo, hi + 1)) if lo <= q <= hi]
     it = items.loc[code]; d = F[code]; th = np.linspace(-6, 6, 241); nb = int(p.get("bins", 10))
+    use = set(str(p.get("use", "abcd"))) | {"b"}
     used = [q for q in sel if bool(it.loc[f"Cau{q}", "Used"])]
-    out = {"theta": th, "items": [], "excluded": [q for q in sel if q not in used]}
+    out = {"theta": th, "items": [], "excluded": [q for q in sel if q not in used], "use": "".join(k for k in "abcd" if k in use)}
+    pe = []
     for q in used:
-        a, b = float(it.loc[f"Cau{q}", "a"]), float(it.loc[f"Cau{q}", "b"])
+        a, b, c, dd = item_params4(it, f"Cau{q}")
+        ae, ce, de = (a if "a" in use else irt.A_DEFAULT), (c if "c" in use else irt.C_DEFAULT), (dd if "d" in use else irt.D_DEFAULT)
+        pe.append((ae, b, ce, de))
         t_o, p_o, n_o = ip._observed_curve(d["Theta"], d[f"Cau{q}"], nb, True)
-        out["items"].append({"item": q, "a": a, "b": b, "exp": irt.irt_probability(th, a, b).ravel(), "iif": irt.cal_iif(a, b, th), "obs_x": t_o, "obs_y": p_o,
+        out["items"].append({"item": q, "a": a, "b": b, "c": c, "d": dd, "exp": irt.irt_probability(th, ae, b, ce, de).ravel(),
+                             "iif": irt.cal_iif(ae, b, th, c=ce, d=de), "obs_x": t_o, "obs_y": p_o,
                              "infit": it.loc[f"Cau{q}", "Infit_MSQ"], "outfit": it.loc[f"Cau{q}", "Outfit_MSQ"]})
     if used:                                                                    # TCC nhóm câu đã chọn
-        a = it.loc[[f"Cau{q}" for q in used], "a"].to_numpy(float); b = it.loc[[f"Cau{q}" for q in used], "b"].to_numpy(float)
+        a, b, c, dd = (np.array(v, float) for v in zip(*pe))
         U = np.where(d[[f"Cau{q}" for q in used]].to_numpy(float) == 1, 1, 0).sum(axis=1)
         tt = d["Theta"].to_numpy(float); ok = np.isfinite(tt); g = np.array_split(np.argsort(tt[ok], kind="stable"), nb)
-        tif = sum(irt.cal_iif(float(x), float(y), th) for x, y in zip(a, b)); out["tif"] = {"y": tif, "se": 1 / np.sqrt(np.maximum(tif, 1e-9)), "n": len(used)}
-        out["tcc"] = {"exp": irt.irt_probability(th, a, b).sum(axis=1), "n": len(used),
+        tif = sum(irt.cal_iif(*x[:2], th, c=x[2], d=x[3]) for x in pe); out["tif"] = {"y": tif, "se": 1 / np.sqrt(np.maximum(tif, 1e-9)), "n": len(used)}
+        out["tcc"] = {"exp": irt.irt_probability(th, a, b, c, dd).sum(axis=1), "n": len(used),
                       "obs_x": [tt[ok][i].mean() for i in g], "obs_y": [U[ok][i].mean() for i in g]}
     return J(out)
 
@@ -356,7 +391,10 @@ def export_items(ds):
     O = ["A", "B", "C", "D", "Null"]; lab = lambda o: "Trống" if o == "Null" else o
     cols = [("Câu", "q", None), ("Phần", "sec", None), ("CTT Độ khó (p)", "p", "0.000"), ("CTT Phân loại độ khó", "pc", None),
             ("CTT D-Index", "d", "0.000"), ("CTT Phân loại phân biệt", "dc", None)]
-    if rid: cols += [("IRT a", "a", "0.000"), ("IRT b", "b", "0.000"), ("IRT se_a", "se_a", "0.000"), ("IRT se_b", "se_b", "0.000"),
+    model = int(json.loads(run_row(rid)["config"]).get("model", 2)) if rid else 2
+    if rid: cols += [("IRT a", "a", "0.000"), ("IRT b", "b", "0.000")] + ([("IRT c", "irt_c", "0.000")] if model >= 3 else []) + \
+                    ([("IRT d", "irt_d", "0.000")] if model >= 4 else []) + [("IRT se_a", "se_a", "0.000"), ("IRT se_b", "se_b", "0.000")] + \
+                    ([("IRT se_c", "se_c", "0.000")] if model >= 3 else []) + ([("IRT se_d", "se_d", "0.000")] if model >= 4 else []) + [
                      ("IRT Infit", "Infit_MSQ", "0.00"), ("IRT Outfit", "Outfit_MSQ", "0.00"), ("IRT Fit", "Fit_Label", None),
                      ("IRT χ²", "Chi2", "0.00"), ("IRT p-value", "p_value", "0.000"), ("IRT Dùng", "used", None), ("IRT Cần xem xét", "review", None)]
     cols += [("Nhiễu Đáp án đúng", "key", None)] + [(f"Nhiễu % {lab(o)}", f"p_{o}", "0.0%") for o in O] + [(f"Nhiễu r {lab(o)}", f"r_{o}", "0.000") for o in O]
@@ -366,6 +404,8 @@ def export_items(ds):
         q = it["item"]; ir = irt_items.get(f"Cau{q}", {}); key = nr["key"]; used = bool(ir.get("Used")) if ir else False
         row = {"q": q, "sec": secname[it["section"]], "p": it["CTT"], "pc": it["Độ khó"], "d": it["D-Index"], "dc": it["Độ phân biệt"], "key": key}
         row.update({k: (ir.get(k) if used else None) for k in ("a", "b", "se_a", "se_b", "Infit_MSQ", "Outfit_MSQ", "Fit_Label", "Chi2", "p_value")})
+        row.update({"irt_c": ir.get("c") if used else None, "irt_d": ir.get("d") if used else None,
+                    "se_c": ir.get("se_c") if used else None, "se_d": ir.get("se_d") if used else None})
         row.update({"used": ("✓" if used else "✗") if ir else None, "review": "⚠" if ir.get("review") and used else None})
         for o in O: row[f"p_{o}"], row[f"r_{o}"] = nr[f"p_{o}"], nr[f"pbcc_{o}"]
         ws.append([num(row.get(c[1])) for c in cols])
@@ -402,20 +442,26 @@ def export_items(ds):
 def export_params(rid):
     items = pd.DataFrame(json.loads(run_row(rid)["items"])); items = items[items["Used"] == True]   # noqa: E712
     items["id"] = items["Item"].str.extract(r"(\d+)").astype(int)
-    out = items[["Test", "id", "a", "b"]].rename(columns={"Test": "test"}); out.loc[out["test"].duplicated(), "test"] = None
+    cols = ["Test", "id", "a", "b"] + [k for k in ("c", "d") if k in items.columns]
+    out = items[cols].rename(columns={"Test": "test"}); out.loc[out["test"].duplicated(), "test"] = None
     f = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name; out.to_excel(f, sheet_name="X", index=False)
     return send_file(f, as_attachment=True, download_name=f"tham_so_run{rid}.xlsx")
 
 
 # ------------------------------------------------------------------ Neo đề (linking_equating.py)
-def table(text, cols):
+def table(text, cols, extra=()):
+    """Bảng nhập tay; extra: cột tuỳ chọn ở cuối dòng (vd c, d)."""
     rows = [re.split(r"[,;\t ]+", l.strip()) for l in (text or "").splitlines() if l.strip() and not l.lstrip()[0].isalpha()]
-    return pd.DataFrame(rows, columns=cols).apply(pd.to_numeric)
+    n = max([len(r) for r in rows] + [len(cols)]); allc = list(cols) + list(extra)
+    if n > len(allc): raise ValueError(f"Mỗi dòng tối đa {len(allc)} giá trị: {', '.join(allc)}")
+    if any(len(r) < len(cols) for r in rows): raise ValueError(f"Mỗi dòng cần ít nhất: {', '.join(cols)}")
+    return pd.DataFrame([r + [None] * (n - len(r)) for r in rows], columns=allc[:n]).apply(pd.to_numeric)
 
 def link_args(o):
     a = ["--no-plots", "--boot", str(o.get("boot", 0)), "--d-x", str(o.get("d_x", irt.D)), "--d-y", str(o.get("d_y", 1.0)),
          "--weights", o.get("weights", "normal"), "--a-min", str(o.get("a_min", .06)), "--b-max", str(o.get("b_max", 4))]
     if o.get("one_sided"): a.append("--one-sided")
+    a += ["--link-params", o.get("link_params") or "ab"]
     if o.get("purify"): a += ["--purify", str(o["purify"])]
     return le.parse_args(a)
 
@@ -428,29 +474,41 @@ def link_items(Ps, Pt, anc, args, d_s, d_t):
         if len(A_) < 3: continue
         s, t = Ps.loc[A_.S], Pt.loc[A_.Dst]
         a_irt, b_s, a_s, a_t, b_t = s.a.to_numpy(float), s.b.to_numpy(float), d_s * s.a.to_numpy(float), d_t * t.a.to_numpy(float), t.b.to_numpy(float)
+        (cs, ds), (ct, dt) = le.cd_columns(s, args), le.cd_columns(t, args)
+        cdk = lambda m: dict(cx=le._sub(cs, m), dx=le._sub(ds, m), cy=le._sub(ct, m), dy=le._sub(dt, m))
         used, why = le.screen_anchors(a_irt, b_s, a_t, b_t, args.a_min, args.b_max)
         if used.sum() < 3: continue
         g = le.make_grid(args.quad_points, args.theta_lim); w = le.make_weights(g)
-        A, B, crit = le.fit_stocking_lord(a_s[used], b_s[used], a_t[used], b_t[used], g, w, g, w, not args.one_sided)
-        c1, c2 = le.sl_components(A, B, a_s[used], b_s[used], a_t[used], b_t[used], g, w, g, w, not args.one_sided)
-        rm = le.anchor_rmsd(A, B, a_s, b_s, a_t, b_t, g, w)
+        A, B, crit = le.fit_stocking_lord(a_s[used], b_s[used], a_t[used], b_t[used], g, w, g, w, not args.one_sided, **cdk(used))
+        c1, c2 = le.sl_components(A, B, a_s[used], b_s[used], a_t[used], b_t[used], g, w, g, w, not args.one_sided, **cdk(used))
+        rm = le.anchor_rmsd(A, B, a_s, b_s, a_t, b_t, g, w, **cdk(np.ones(len(a_s), bool)))
         aS, bS = d_s * Ps.loc[ids, "a"].to_numpy(float), Ps.loc[ids, "b"].to_numpy(float)
         aT, bT = d_t * Pt.loc[ids, "a"].to_numpy(float), Pt.loc[ids, "b"].to_numpy(float)
+        (cS, dS), (cT, dT) = le.cd_columns(Ps.loc[ids], args), le.cd_columns(Pt.loc[ids], args)
+        fc = None if cS is None else cS.copy(); fd = None if dS is None else dS.copy()
         a_l, b_l = aS / A, A * bS + B
         amap = {int(x): int(y) for x, y, u in zip(A_.S, A_.Dst, used) if u}
         fa, fb, st = a_l.copy(), b_l.copy(), []
         for k, i in enumerate(ids):
-            if i in amap: j = ids.index(amap[i]); fa[k], fb[k] = aT[j], bT[j]; st.append("Neo (theo đề đích)")
+            if i in amap:
+                j = ids.index(amap[i]); fa[k], fb[k] = aT[j], bT[j]; st.append("Neo (theo đề đích)")
+                if fc is not None: fc[k] = cT[j]
+                if fd is not None: fd[k] = dT[j]
             else: st.append("Link")
         xl = pd.DataFrame({"test": code, "id": ids, "Status": st, "a_nguồn(D=1)": aS, "b_nguồn": bS, "a_link(D=1)": a_l, "b_link": b_l,
                            "a_final(D=1)": fa, "b_final": fb, "a_final(irt.py)": fa / irt.D})
+        if fc is not None: xl.insert(xl.columns.get_loc("b_final") + 1, "c_final", fc)
+        if fd is not None: xl.insert(xl.columns.get_loc("a_final(irt.py)"), "d_final", fd)
         at = pd.DataFrame({"test": code, "Nguồn": A_.S, "Đích": A_.Dst, "Dùng": used, "Lý do loại": why, "a_nguồn(D=1)": a_s, "b_nguồn": b_s,
                            "a_link": a_s / A, "b_link": A * b_s + B, "a_đích(D=1)": a_t, "b_đích": b_t, "ICC_RMSD": rm})
-        tcc = le.tcc_logit(g, a_t[used], b_t[used]) - le.tcc_logit((g - B) / A, a_s[used], b_s[used])
-        sm = {"Test": code, "Tên": label, "N_anchor": len(A_), "N_used": int(used.sum()), "A": A, "B": B, "SLcrit": crit,
+        for nm, v in (("c_nguồn", cs), ("d_nguồn", ds), ("c_đích", ct), ("d_đích", dt)):
+            if v is not None: at.insert(len(at.columns) - 1, nm, v)
+        k_ = cdk(used)
+        tcc = le.tcc_logit(g, a_t[used], b_t[used], k_["cy"], k_["dy"]) - le.tcc_logit((g - B) / A, a_s[used], b_s[used], k_["cx"], k_["dx"])
+        sm = {"Test": code, "Tên": label, "Tham số neo": args.link_params, "N_anchor": len(A_), "N_used": int(used.sum()), "A": A, "B": B, "SLcrit": crit,
               "SLcrit_nguồn": c1, "SLcrit_đích": c2, "TCC_RMSD(anchor)": float(np.sqrt(np.sum(w * tcc ** 2)))}
         res.append(dict(code=code, label=label, ids=ids, A=A, B=B, summary=sm, x_linked=xl, anchor_tbl=at,
-                        aX_L=aS, bX=bS, aX_link=a_l, bX_link=b_l, aY_L=aT, bY=bT, persons=None))
+                        aX_L=aS, bX=bS, aX_link=a_l, bX_link=b_l, aY_L=aT, bY=bT, persons=None, cX=cS, dX_=dS, cY=cT, dY_=dT))
     if not res: raise ValueError("Không phần nào đủ ≥3 câu neo hợp lệ")
     return res
 
@@ -459,14 +517,16 @@ def link_payload(res):
     for r in res:
         out.append({"code": r["code"], "label": r["label"], "A": r["A"], "B": r["B"], "summary": r["summary"],
                     "anchors": records(r["anchor_tbl"]), "items": records(r["x_linked"]), "theta": th, "n": len(r["ids"]),
-                    "tcc_before": le.tcc_logit(th, r["aX_L"], r["bX"]), "tcc_after": le.tcc_logit(th, r["aX_link"], r["bX_link"]),
-                    "tcc_target": le.tcc_logit(th, r["aY_L"], r["bY"]), "persons": r.get("persons")})
+                    "tcc_before": le.tcc_logit(th, r["aX_L"], r["bX"], r.get("cX"), r.get("dX_")),
+                    "tcc_after": le.tcc_logit(th, r["aX_link"], r["bX_link"], r.get("cX"), r.get("dX_")),
+                    "tcc_target": le.tcc_logit(th, r["aY_L"], r["bY"], r.get("cY"), r.get("dY_")), "persons": r.get("persons")})
     return out
 
 def read_xlsx_params(sheets):
     out = {}
     for k in ("X", "Y"):
-        d = sheets[k].copy(); d["id"] = d["id"].astype(int); out[k] = d.set_index("id")[["a", "b"]].astype(float)
+        d = sheets[k].copy(); d["id"] = d["id"].astype(int)
+        out[k] = d.set_index("id")[["a", "b"] + [c for c in ("c", "d") if c in d.columns]].apply(pd.to_numeric, errors="coerce")
     return out["X"], out["Y"], sheets["Anchor"].dropna().astype(int).rename(columns={"X": "S", "Y": "Dst"})
 
 @app.post("/api/link")
@@ -477,8 +537,8 @@ def link():
         path = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name; f.save(path); sheets = pd.read_excel(path, sheet_name=None)
     X = Y = anc = None
     if sheets: X, Y, anc = read_xlsx_params(sheets)
-    if o.get("x_text", "").strip(): X = table(o["x_text"], ["id", "a", "b"]).astype({"id": int}).set_index("id")
-    if o.get("y_text", "").strip(): Y = table(o["y_text"], ["id", "a", "b"]).astype({"id": int}).set_index("id")
+    if o.get("x_text", "").strip(): X = table(o["x_text"], ["id", "a", "b"], ("c", "d")).astype({"id": int}).set_index("id")
+    if o.get("y_text", "").strip(): Y = table(o["y_text"], ["id", "a", "b"], ("c", "d")).astype({"id": int}).set_index("id")
     if o.get("a_text", "").strip(): anc = table(o["a_text"], ["S", "Dst"]).astype(int)
     if X is None or Y is None or anc is None: raise ValueError("Thiếu tham số đề X, đề Y hoặc câu neo (nhập tay hoặc tải file Excel)")
     manual = any(o.get(k, "").strip() for k in ("x_text", "y_text", "a_text"))
