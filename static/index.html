@@ -44,8 +44,7 @@ circle.pt{cursor:pointer}circle.pt:hover{stroke:var(--tx)!important;stroke-width
 #toast{position:fixed;right:14px;bottom:14px;background:var(--tx);color:var(--bg);padding:8px 14px;border-radius:8px;display:none;max-width:420px;z-index:9}
 .sp{display:inline-block;width:14px;height:14px;border:2px solid var(--bd);border-top-color:var(--pri);border-radius:50%;animation:r 1s linear infinite;vertical-align:middle}@keyframes r{to{transform:rotate(360deg)}}
 .hxw{display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);gap:14px;align-items:start}@media(max-width:900px){.hxw{grid-template-columns:minmax(0,1fr)}}
-.hxo label{margin:8px 0 3px}.hx-sw{width:24px;height:24px;padding:0;border-radius:50%;border:2px solid var(--card);box-shadow:0 0 0 1px var(--bd)}.hx-sw.on{box-shadow:0 0 0 2px var(--tx)}
-.hx-c{width:34px;height:26px;padding:1px}.hxp{background:#fff;border:1px solid #dfe3ea;border-radius:8px;min-height:120px}.hx-img{display:block;width:100%;transition:opacity .2s}
+.hxo label{margin:8px 0 3px}.hx-c{width:44px;height:30px;padding:2px;cursor:pointer}.hx-h.bad{border-color:var(--bad);color:var(--bad)}.hxp{background:#fff;border:1px solid #dfe3ea;border-radius:8px;min-height:120px}.hx-img{display:block;width:100%;transition:opacity .2s}
 /* ---- tab Đường cong ---- */
 .cvw{display:grid;grid-template-columns:minmax(300px,390px) minmax(0,1fr);gap:12px;align-items:start}
 @media(max-width:980px){.cvw{grid-template-columns:minmax(0,1fr)}}
@@ -163,11 +162,10 @@ V.score=async()=>{if(!need("ds"))return;const j=await api("/api/score/"+S.ds);co
   ${tbl(j.rows.slice(0,300),show.concat(q).map(c=>[c,c,v=>v??""]))}</div>`};
 
 /* ---------- Xuất phổ điểm tổng (thô / thực / sau neo) ---------- */
-const HXC=["#298c8c","#1f5fbf","#d62728","#e08a00","#2ca02c","#9467bd","#4d4d4d"];
 function hxCard(src,q,title){const O=(S.hx||(S.hx={}))[src]||(S.hx[src]={color:"#298c8c",kde:true,stats:src!="raw",title:null,bw:""});
  return `<div class="card hx" data-src="${src}" data-q='${JSON.stringify(q)}' data-t="${esc(title)}"><h2>Xuất phổ điểm tổng — ${src=="raw"?"điểm thô":src=="true"?"điểm thực":"sau neo đề"}</h2><div class="hxw"><div class="hxo">
  <label>Tiêu đề</label><div class="row" style="flex-wrap:nowrap"><input class="hx-t" value="${esc(O.title??title)}" style="flex:1;min-width:0"><button class="hx-rs" title="Về tiêu đề mặc định">↺</button></div>
- <label>Màu</label><div class="row">${HXC.map(c=>`<button class="hx-sw${c==O.color?" on":""}" data-c="${c}" style="background:${c}" title="${c}"></button>`).join("")}<input type="color" class="hx-c" value="${O.color}" title="Màu tuỳ chọn"></div>
+ <label>Màu</label><div class="row" style="flex-wrap:nowrap"><input type="color" class="hx-c" value="${O.color}" title="Chọn màu trên bảng màu"><input class="hx-h" value="${O.color}" maxlength="7" spellcheck="false" placeholder="#298c8c" title="Mã hex, vd #298c8c" style="width:100px;font-family:ui-monospace,monospace"></div>
  <label>Tuỳ chọn</label><div class="row"><label class="ck"><input type="checkbox" class="hx-k" ${O.kde?"checked":""}> Vẽ đường KDE</label><label class="ck"><input type="checkbox" class="hx-s" ${O.stats?"checked":""}> Hộp thống kê</label></div>
  <label>Độ rộng nhóm</label><input class="hx-b" type="number" min="1" value="${O.bw}" placeholder="${src=="raw"?5:50}" style="width:90px">
  <div class="row" style="margin-top:10px"><button class="p hx-png">Xuất PNG</button><button class="hx-svg">Xuất SVG</button></div></div>
@@ -175,8 +173,10 @@ function hxCard(src,q,title){const O=(S.hx||(S.hx={}))[src]||(S.hx[src]={color:"
 function hxBind(){document.querySelectorAll("#view .hx").forEach(el=>{const src=el.dataset.src,q=JSON.parse(el.dataset.q),O=S.hx[src],f=c=>el.querySelector(c);let tm;
  const url=(dl,fmt)=>"/api/hist?"+new URLSearchParams({src,...q,title:f(".hx-t").value,color:O.color,kde:O.kde?1:0,stats:O.stats?1:0,bw:O.bw||"",fmt:fmt||"png",dl:dl?1:0});
  const prev=()=>{clearTimeout(tm);tm=setTimeout(()=>{const im=f(".hx-img");im.style.opacity=.5;im.onload=()=>im.style.opacity=1;im.onerror=()=>{im.style.opacity=1;toast("Không vẽ được phổ điểm (kiểm tra dữ liệu nguồn)")};im.src=url(0)},250)};
- const setC=c=>{O.color=c;f(".hx-c").value=c;el.querySelectorAll(".hx-sw").forEach(b=>b.classList.toggle("on",b.dataset.c==c));prev()};
- el.querySelectorAll(".hx-sw").forEach(b=>b.onclick=()=>setC(b.dataset.c));f(".hx-c").oninput=e=>setC(e.target.value);
+ const setC=(c,from)=>{c=c.toLowerCase();O.color=c;if(from!="c")f(".hx-c").value=c;if(from!="h")f(".hx-h").value=c;f(".hx-h").classList.remove("bad");prev()};
+ f(".hx-c").oninput=e=>setC(e.target.value,"c");
+ f(".hx-h").oninput=e=>{let v=e.target.value.trim();if(v&&v[0]!="#")v="#"+v;if(/^#[0-9a-f]{3}$/i.test(v))v="#"+[...v.slice(1)].map(x=>x+x).join("");
+  /^#[0-9a-f]{6}$/i.test(v)?setC(v,"h"):e.target.classList.add("bad")};f(".hx-h").onblur=e=>{e.target.value=O.color;e.target.classList.remove("bad")};
  f(".hx-t").oninput=e=>{O.title=e.target.value;prev()};f(".hx-rs").onclick=()=>{O.title=null;f(".hx-t").value=el.dataset.t;prev()};
  f(".hx-k").onchange=e=>{O.kde=e.target.checked;prev()};f(".hx-s").onchange=e=>{O.stats=e.target.checked;prev()};f(".hx-b").onchange=e=>{O.bw=+e.target.value>0?e.target.value:"";prev()};
  const dl=fmt=>{location.href=url(1,fmt)};
