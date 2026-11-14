@@ -349,6 +349,70 @@ def curves():
     return J(out)
 
 
+# ------------------------------------------------------------------ Phổ điểm tổng (thô / thực / sau neo)
+HIST_SRC = {"raw": ("Số câu đúng", 120, 5), "true": ("Điểm thực", 1200, 50), "link": ("Điểm thực", 1200, 50)}
+
+def total_scores(src, g):
+    """Điểm tổng của từng thí sinh theo nguồn; trả về (mảng điểm, tên mặc định cho tiêu đề)."""
+    if src == "raw":
+        ds = int(g("ds")); ch, ans, F = frames(ds)
+        name = db().execute("SELECT name FROM datasets WHERE id=?", (ds,)).fetchone()
+        return sum(F[c]["Raw"].to_numpy(float) for c in CODES), "Phổ điểm thô - " + (re.sub(r"\.csv$", "", name["name"], flags=re.I) if name else f"đợt #{ds}")
+    if src == "true":
+        r = run_row(int(g("run"))); P = pd.DataFrame(json.loads(r["persons"]))
+        return P["Total_True"].to_numpy(float), f"Phổ điểm tổng sau quy đổi - {r['name']}"
+    if src == "link":
+        r = run_row(int(g("link"))); res = json.loads(r["extra"]).get("results", [])
+        parts = [pd.DataFrame(x["persons"]).set_index("SBD")["True_new"].rename(x["code"]) for x in res if x.get("persons")]
+        if len(parts) < len(CODES): raise ValueError("Lần neo này không có điểm thực mới của đủ 4 phần (chỉ có khi neo đầy đủ từ file Excel)")
+        T = pd.concat(parts, axis=1).apply(pd.to_numeric, errors="coerce").sum(axis=1, min_count=1)   # phần θ chạm biên (không quy đổi được) tính 0 điểm
+        return T.to_numpy(float), f"Phổ điểm sau neo đề - {r['name']}"
+    raise ValueError("Nguồn phổ điểm không hợp lệ")
+
+@app.get("/api/hist")
+def hist_plot():
+    """Vẽ phổ điểm tổng theo mẫu báo cáo (cột + số đếm, KDE, hộp thống kê). dl=1 -> tải về."""
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+    from scipy.stats import gaussian_kde
+    g = request.args.get; src = g("src", "true")
+    xlab, xmax, bw0 = HIST_SRC.get(src, HIST_SRC["true"])
+    x, title0 = total_scores(src, g); x = x[np.isfinite(x)]
+    if not len(x): raise ValueError("Không có điểm để vẽ")
+    color = g("color") or "#298c8c"
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color): color = "#298c8c"
+    bw = max(float(g("bw") or bw0), 1e-6); kde = g("kde", "1") == "1"; stats = g("stats", "1") == "1"
+    title = g("title") if g("title") is not None else title0; fmt = "svg" if g("fmt") == "svg" else "png"
+    rc = {"font.family": "serif", "font.serif": ["Times New Roman", "Times", "DejaVu Serif"], "axes.edgecolor": "#cccccc",
+          "axes.linewidth": 1.25, "grid.color": "#cccccc", "grid.linewidth": 1.0, "svg.fonttype": "none"}
+    with plt.rc_context(rc):
+        fig, ax = plt.subplots(figsize=(12, 6.2), dpi=150)
+        lo, hi = np.floor(x.min() / bw) * bw, max(np.ceil(x.max() / bw) * bw, np.floor(x.min() / bw) * bw + bw)
+        if hi <= x.max(): hi += bw
+        edges = np.arange(lo, hi + bw / 2, bw)
+        cnt, _, bars = ax.hist(x, bins=edges, color=color, alpha=.5, edgecolor="white", linewidth=1.2, zorder=2)
+        for b, n in zip(bars, cnt):
+            if n > 0: ax.text(b.get_x() + b.get_width() / 2, n, f"{int(n)}", ha="center", va="bottom", fontsize=11, color="#262626", zorder=4)
+        if kde and len(x) > 2 and np.std(x) > 0:
+            k = gaussian_kde(x); xs = np.linspace(x.min(), x.max(), 400)
+            ax.plot(xs, k(xs) * len(x) * bw, color=color, linewidth=2, zorder=3)
+        if stats:
+            lines = [f"Tổng số thí sinh dự thi: {len(x)}", f"Cao nhất: {x.max():g}", f"Thấp nhất: {x.min():g}",
+                     f"Trung bình: {x.mean():.2f}", f"Trung vị: {np.median(x):.1f}", f"Độ lệch chuẩn: {x.std(ddof=1):.2f}"]
+            ax.legend([Patch(visible=False)] * len(lines), lines, loc="upper left", fontsize=14, handlelength=2.2, labelspacing=.25,
+                      frameon=True, framealpha=.9, edgecolor="#cccccc")
+        ax.set_xlim(0, max(xmax, hi)); ax.set_ylim(0, max(cnt.max(), 1) * 1.08)
+        ax.grid(True, zorder=0); ax.set_axisbelow(True)
+        ax.set_title(title, fontsize=15); ax.set_xlabel(xlab, fontsize=14); ax.set_ylabel("Số lượng", fontsize=14)
+        ax.tick_params(labelsize=12, length=0)
+        fig.tight_layout(); buf = io.BytesIO(); fig.savefig(buf, format=fmt, facecolor="white"); plt.close(fig)
+    import unicodedata
+    ascii_ = unicodedata.normalize("NFKD", title.replace("đ", "d").replace("Đ", "D")).encode("ascii", "ignore").decode()
+    buf.seek(0); name = re.sub(r"[^A-Za-z0-9\-]+", "_", ascii_).strip("_") or "pho_diem"   # tên file không dấu
+    return send_file(buf, mimetype="image/svg+xml" if fmt == "svg" else "image/png",
+                     as_attachment=g("dl") == "1", download_name=f"{name}.{fmt}")
+
+
 @app.post("/api/figure")
 def save_figure():
     """Trả hình (PNG/SVG) do trình duyệt vẽ về dạng tệp tải xuống (chạy được cả trong cửa sổ app lẫn trình duyệt)."""
@@ -567,13 +631,13 @@ def link():
     c = db(); cur = c.execute("INSERT INTO runs(ds,kind,name,ts,config,items,persons,extra) VALUES(?,?,?,?,?,?,?,?)",
                               (0, "link", o.get("name") or f"Neo {direction} {now()}", now(), json.dumps(o), "[]", "[]", json.dumps(san(payload))))
     c.commit(); shutil.copy(rid_files, DATA / f"link_{cur.lastrowid}.xlsx")
-    return J({"id": cur.lastrowid, **payload})
+    return J({"id": cur.lastrowid, "name": o.get("name") or f"Neo {direction} {now()}", **payload})
 
 @app.get("/api/links")
 def links(): return J([{"id": r["id"], "name": r["name"], "ts": r["ts"]} for r in db().execute("SELECT * FROM runs WHERE kind='link' ORDER BY id DESC")])
 
 @app.get("/api/link/<int:rid>")
-def link_get(rid): return J({"id": rid, **json.loads(run_row(rid)["extra"])})
+def link_get(rid): r = run_row(rid); return J({"id": rid, "name": r["name"], **json.loads(r["extra"])})
 
 @app.get("/api/link/<int:rid>/xlsx")
 def link_xlsx(rid): return send_file(DATA / f"link_{rid}.xlsx", as_attachment=True, download_name=f"neo_de_{rid}.xlsx")
