@@ -122,16 +122,32 @@ def _clip_c(a, c, b_bounds):
     return float(np.clip(c, -a * hi if hi is not None else -np.inf, -a * lo if lo is not None else np.inf))
 
 
-def _mstep_item(n_k, r_k, theta, a, c, reg, a_bounds, n_newton=10, b_bounds=None, fix_a=False):
+def _a_prior_terms(a, reg, a_prior=None):
+    """
+    (log prior, đạo hàm, "thông tin" dương) của a.
+      a_prior=None          : a ~ N(1, 1/reg) (penalty rất nhẹ như bản cũ)
+      a_prior=(mu, sigma)   : log(a) ~ N(mu, sigma^2) - prior log-chuẩn (BILOG-MG, mirt dùng cho 3PL/4PL),
+                              kéo a về quanh exp(mu) khi dữ liệu không đủ để xác định a.
+    """
+    if a_prior is None:
+        return -0.5 * reg * (a - 1.0) ** 2, -reg * (a - 1.0), reg
+    mu, sg = a_prior
+    la = np.log(max(a, 1e-12))
+    return (-la - (la - mu) ** 2 / (2 * sg ** 2),
+            -(1.0 + (la - mu) / sg ** 2) / a,
+            1.0 / (sg ** 2 * a ** 2))
+
+
+def _mstep_item(n_k, r_k, theta, a, c, reg, a_bounds, n_newton=10, b_bounds=None, fix_a=False, a_prior=None):
     """
     M-step cho một item theo tham số (a, c) với c = -a*b, eta = D*(a*theta + c).
-    Q lõm theo (a, c) nên Fisher scoring rất ổn định. Penalty nhẹ: a ~ N(1, 1/reg), c ~ N(0, 1/reg).
+    Q lõm theo (a, c) nên Fisher scoring rất ổn định. Penalty nhẹ: c ~ N(0, 1/reg); a theo _a_prior_terms.
     b_bounds: chiếu c để b nằm trong khoảng cho phép. fix_a=True (1PL): chỉ cập nhật c, a giữ nguyên.
     """
     def Q(a_, c_):
         P = np.clip(expit(D * (a_ * theta + c_)), 1e-12, 1 - 1e-12)
         return (np.sum(r_k * np.log(P) + (n_k - r_k) * np.log1p(-P))
-                - 0.5 * reg * ((0.0 if fix_a else (a_ - 1.0) ** 2) + c_ ** 2))
+                + (0.0 if fix_a else _a_prior_terms(a_, reg, a_prior)[0]) - 0.5 * reg * c_ ** 2)
 
     c = _clip_c(a, c, b_bounds)
     q0 = Q(a, c)
@@ -144,11 +160,11 @@ def _mstep_item(n_k, r_k, theta, a, c, reg, a_bounds, n_newton=10, b_bounds=None
             gc = np.sum(res * vc) - reg * c
             delta = np.array([0.0, gc / (np.sum(w * vc * vc) + reg + 1e-8)])
         else:
-            g = np.array([np.sum(res * va) - reg * (a - 1.0),
+            _, ga, ia = _a_prior_terms(a, reg, a_prior)
+            g = np.array([np.sum(res * va) + ga,
                           np.sum(res * vc) - reg * c])
-            I = np.array([[np.sum(w * va * va), np.sum(w * va * vc)],
-                          [np.sum(w * va * vc), np.sum(w * vc * vc)]])
-            I += (reg + 1e-8) * np.eye(2)
+            I = np.array([[np.sum(w * va * va) + ia + 1e-8, np.sum(w * va * vc)],
+                          [np.sum(w * va * vc), np.sum(w * vc * vc) + reg + 1e-8]])
             try:
                 delta = np.linalg.solve(I, g)
             except np.linalg.LinAlgError:
@@ -172,11 +188,11 @@ def _mstep_item(n_k, r_k, theta, a, c, reg, a_bounds, n_newton=10, b_bounds=None
     return a, c
 
 
-def _common_a(n_kj, r_kj, theta, b, a0, reg, a_bounds):
+def _common_a(n_kj, r_kj, theta, b, a0, reg, a_bounds, a_prior=None):
     """1PL: cập nhật a chung (b của từng câu giữ cố định) bằng tối ưu một chiều."""
     def nq(a_):
         P = np.clip(expit(D * a_ * (theta[:, None] - b[None, :])), 1e-12, 1 - 1e-12)
-        return -(np.sum(r_kj * np.log(P) + (n_kj - r_kj) * np.log1p(-P)) - 0.5 * reg * (a_ - 1.0) ** 2)
+        return -(np.sum(r_kj * np.log(P) + (n_kj - r_kj) * np.log1p(-P)) + _a_prior_terms(a_, reg, a_prior)[0])
     r = minimize_scalar(nq, bounds=a_bounds, method="bounded", options={"xatol": 1e-6})
     return float(r.x) if r.fun <= nq(a0) else float(a0)
 
@@ -184,7 +200,7 @@ def _common_a(n_kj, r_kj, theta, b, a0, reg, a_bounds):
 # ----------------------------------------------------------------------
 # M-step 3PL / 4PL (L-BFGS-B có chặn, prior Beta cho c và d)
 # ----------------------------------------------------------------------
-def _mstep_item_4pl(n_k, r_k, theta, x0, free, bounds, reg, c_prior, d_prior, maxiter=40):
+def _mstep_item_4pl(n_k, r_k, theta, x0, free, bounds, reg, c_prior, d_prior, maxiter=40, a_prior=None):
     """
     x0   : (a, b, c, d) hiện tại;  free: tên các tham số được ước lượng (vd ('a','b','c')).
     Q    = sum_k r_k log P + (n_k - r_k) log(1-P) + log prior
@@ -210,8 +226,9 @@ def _mstep_item_4pl(n_k, r_k, theta, x0, free, bounds, reg, c_prior, d_prior, ma
         grads = {"a": np.sum(g_P * s * D * (theta - b)), "b": np.sum(g_P * -s * D * a),
                  "c": np.sum(g_P * (1 - psi)), "d": np.sum(g_P * psi)}
         # prior
-        ll -= 0.5 * reg * ((a - 1.0) ** 2 + b ** 2)
-        grads["a"] -= reg * (a - 1.0)
+        lpa, gpa, _ = _a_prior_terms(a, reg, a_prior)
+        ll += lpa - 0.5 * reg * b ** 2
+        grads["a"] += gpa
         grads["b"] -= reg * b
         if "c" in free:
             ll += (ac - 1) * np.log(c) + (bc - 1) * np.log1p(-c)
@@ -247,7 +264,7 @@ def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-6, tol_param=1e-4,
          reg=1e-2, a_bounds=(0.05, 4.0), b_bounds=None,
          a_init=None, b_init=None, verbose=True, return_ll=False,
          model=2, c_bounds=(0.0, 0.5), d_bounds=(0.5, 1.0),
-         c_prior=(5.0, 17.0), d_prior=(17.0, 2.0), c_init=None, d_init=None, return_cd=False):
+         c_prior=(5.0, 17.0), d_prior=(17.0, 2.0), c_init=None, d_init=None, return_cd=False, a_prior=None):
     """
     MMLE-EM (Bock & Aitkin, 1981) cho 1PL / 2PL / 3PL / 4PL.
       model=1 : một a chung cho mọi câu (ước lượng), b riêng; c = 0, d = 1
@@ -256,8 +273,14 @@ def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-6, tol_param=1e-4,
       model=4 : a, b, c, d (trượt, prior Beta(d_prior))
     a_bounds, b_bounds : giới hạn ước lượng (b_bounds=None: b không bị chặn).
     reg > 0 : penalty nhẹ (MAP). reg=0: ML thuần.
+    a_prior : None (a ~ N(1, 1/reg), gần như không ràng buộc) hoặc (mu, sigma): log(a) ~ N(mu, sigma^2).
+              Nên dùng với 3PL/4PL (vd (0, 0.5)) để a không chạy lên trần khi dữ liệu không xác định được a.
     Trả về (a, b) [+ ll]; return_cd=True -> (a, b, c, d) [+ ll].
     """
+    if a_prior is not None:
+        a_prior = (float(a_prior[0]), float(a_prior[1]))
+        if not a_prior[1] > 0:
+            raise ValueError("Độ lệch chuẩn của prior log-chuẩn cho a phải > 0")
     model = int(model)
     if model not in MODELS:
         raise ValueError("model phải là 1, 2, 3 hoặc 4")
@@ -276,7 +299,8 @@ def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-6, tol_param=1e-4,
     if model >= 3:
         # khởi đầu ấm bằng 2PL rồi ước lượng thêm c (và d)
         a, b = mmle(U, name=name + "/init", max_iter=min(max_iter, 150), K=K, tol=1e-4, tol_param=1e-3,
-                    reg=reg, a_bounds=a_bounds, b_bounds=b_bounds, a_init=a_init, b_init=b_init, verbose=False)
+                    reg=reg, a_bounds=a_bounds, b_bounds=b_bounds, a_init=a_init, b_init=b_init, verbose=False,
+                    a_prior=a_prior)
         cb, db_ = _norm_bounds(c_bounds, (0.0, 0.5)), _norm_bounds(d_bounds, (0.5, 1.0))
         cb = (max(cb[0], 1e-6), cb[1])
         db_ = (db_[0], min(db_[1], 1 - 1e-6))
@@ -295,7 +319,7 @@ def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-6, tol_param=1e-4,
             old = np.c_[a, b, c, d].copy()
             for j in range(J):
                 a[j], b[j], c[j], d[j] = _mstep_item_4pl(n_kj[:, j], r_kj[:, j], theta, old[j], free, bounds,
-                                                         reg, c_prior, d_prior)
+                                                         reg, c_prior, d_prior, a_prior=a_prior)
             d_ll = ll - prev_ll
             d_par = float(np.max(np.abs(np.c_[a, b, c, d] - old)))
             if verbose and (it == 1 or it % 10 == 0):
@@ -337,10 +361,10 @@ def mmle(U, name="MMLE", max_iter=300, K=41, tol=1e-6, tol_param=1e-4,
         a_old, c_old = a.copy(), c.copy()
         for j in range(J):
             a[j], c[j] = _mstep_item(n_kj[:, j], r_kj[:, j], theta, a[j], c[j], reg, a_bounds,
-                                     b_bounds=b_bounds, fix_a=(model == 1))
+                                     b_bounds=b_bounds, fix_a=(model == 1), a_prior=a_prior)
         if model == 1:                                           # a chung, b giữ nguyên
             b_cur = -c / a
-            a_new = _common_a(n_kj, r_kj, theta, b_cur, a[0], reg, a_bounds)
+            a_new = _common_a(n_kj, r_kj, theta, b_cur, a[0], reg, a_bounds, a_prior)
             a = np.full(J, a_new)
             c = -a * b_cur
 

@@ -240,10 +240,13 @@ def irt_run():
     if a_bounds[0] <= 0 or a_bounds[0] >= a_bounds[1]: raise ValueError("Giới hạn a không hợp lệ (cần 0 < a min < a max)")
     if b_lo is not None and b_hi is not None and b_lo >= b_hi: raise ValueError("Giới hạn b không hợp lệ (cần b min < b max)")
     true_pl = int(p.get("true_pl") or max(model, 2))
+    ap = p.get("a_prior")                                          # {"mu":0,"sigma":0.5} -> log(a) ~ N(mu, sigma^2)
+    a_prior = (float(ap.get("mu", 0) or 0), float(ap.get("sigma", 0.5) or 0.5)) if ap else None
+    if a_prior and a_prior[1] <= 0: raise ValueError("σ của prior log-chuẩn cho a phải > 0")
     series = [[F[c], hi, c] for c, _, _, hi in SEC]
     items, persons = irt_series.run_irt_series(series, exclude=ex, a_init=a_init, b_init=b_init,
                                                theta_method=p.get("method", "MLE"), verbose=False,
-                                               model=model, a_bounds=a_bounds, b_bounds=b_bounds)
+                                               model=model, a_bounds=a_bounds, b_bounds=b_bounds, a_prior=a_prior)
     for c in CODES: irt_series.cal_true_score(F[c], items.loc[c], pl=true_pl)
     P = ch[["SBD"]].copy()
     for c in CODES:
@@ -251,7 +254,8 @@ def irt_run():
     P["Total_True"] = P[[f"{c}_True" for c in CODES]].sum(axis=1)
     it = items.reset_index(); it["review"] = (it["p_value"] < .05) & ((it["se_b"] > 10) | (it["se_a"] > 3))
     cfg = {"exclude": ex, "method": p.get("method", "MLE"), "init_run": p.get("init_run"), "model": model,
-           "a_bounds": list(a_bounds), "b_bounds": list(b_bounds) if b_bounds else None, "true_pl": true_pl}
+           "a_bounds": list(a_bounds), "b_bounds": list(b_bounds) if b_bounds else None, "true_pl": true_pl,
+           "a_prior": list(a_prior) if a_prior else None}
     c = db(); cur = c.execute("INSERT INTO runs(ds,kind,name,ts,config,items,persons,extra) VALUES(?,?,?,?,?,?,?,?)",
                               (ds, "irt", p.get("name") or f"Lần chạy {now()}", now(), json.dumps(cfg), json.dumps(records(it)),
                                json.dumps(records(P)), "{}")); c.commit()
